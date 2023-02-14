@@ -43,3 +43,7 @@ you can change that in tools/tools.py and change port and host
 
 	PORT=12345
 	HOST='0.0.0.0'
+	
+notes:
+
+is very sensible to noise
