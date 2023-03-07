@@ -1,4 +1,4 @@
-# No-Deep-Translate
+# Google-EAFIT-Translator
 
 Software for voice2voice translate system without machine lerning via sockets
 
