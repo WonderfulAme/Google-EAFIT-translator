@@ -13,7 +13,7 @@ try:
         speak(rcvdData)
         sendData =recordAudio()# input("N: ")
         c.send(sendData.encode())
-        if(sendData == "Bye" or sendData == "bye"):
+        if(sendData.lower() == "bye"):
             break
 except:
     c.close()  
