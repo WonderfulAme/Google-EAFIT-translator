@@ -8,7 +8,7 @@ while True:
 	#txt = input("S: ")
 	txt=webTranslate(txt,FROMIDIOM,TOIDIOM)
 	s.send(txt.encode());
-	if(txt == "Bye" or txt == "bye"):
+	if(txt.lower() == "bye"):
 		break
 	rcvdData=str(s.recv(1024).decode())
 	print ("N:",rcvdData)
