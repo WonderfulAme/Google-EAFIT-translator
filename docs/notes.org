@@ -1,0 +1,35 @@
+* subramas
+
+** telematica
+
+mandamos los datos desde diferentes idomas a  difernets idiomas 
+
+trasmite:
+idioma X , idioma Y ,idioma Z
+ |
+manda texto (en su idioma natal), idioma natal
+ |
+persona que habla idoma A,recive esos idomas y los traduce
+
+
+** frontend-backend
+*** backend
+*** frontend
+
+2 paginas
+**** configuracion
+input:puerto
+input:host
+submit:
+**** reproduccion
+idiomas
+mute
+langues
+** datos
+** bases de datos
+** whisper
+* Roles y equipos
+** whisper
+** bases de datos y desplige
+** front-end- backend
+** telematica
