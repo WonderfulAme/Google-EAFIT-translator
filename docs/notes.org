@@ -23,7 +23,7 @@ input:host
 submit:
 **** reproduccion
 idiomas
-mute
+button:mute
 langues
 ** datos
 ** bases de datos

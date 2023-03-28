@@ -1,0 +1,16 @@
+{% extends  'template.html'%}
+{% block content %}
+<h2>Mute</h2>
+<br>
+<label class="switch">
+  <input type="checkbox">
+  <span class="slider round"></span>
+</label>
+<br>
+<h2>Change language</h2>
+<select>
+	{% for i in languages %}
+	<option>{{ i }}</option>
+	{% endfor %}
+</select>
+{% endblock  %}
