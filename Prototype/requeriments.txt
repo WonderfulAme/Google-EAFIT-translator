@@ -1,4 +1,0 @@
-SpeechRecognition
-PyAudio
-gtts
-deep_translator
