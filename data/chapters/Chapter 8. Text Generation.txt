@@ -580,7 +580,3 @@ encounter the most common ones later in the next chapter where we have a look at
 and evaluate a model for text summarization. If you can’t wait to learn how to train a GPT type
 model from scratch you can skip right to [Link to Come] where we collect a large dataset of
 code and then train a autoregressive language model on it.
-
-1 Language Models are Unsupervised Multitask Learners, A. Radford et al. (2018)
-2 Language Models are Few-Shot Learners, T.B. Brown et al. (2020)
-3 CTRL: A Conditional Transformer Language Model for Controllable Generation, N. Keskar et al. (2019)
