@@ -1359,17 +1359,3 @@ almost any NLP models with transformers. So the question is where to
 next? In the next and last chapter we have a look at where the field is
 currently moving and what new exciting applications and domains beyond
 NLP transformer models can tackle.
-
-1 Aligning books and movies: Towards story-like visual explanations by watching movies and
-reading books., Y. Zhu et al. (2015)
-2 Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer, C. Raffel
-et al. (2019)
-3 Documenting the English Colossal Clean Crawled Corpus, J. Dodge et al (2021).
-4 Addressing “Documentation Debt” in Machine Learning Research: A Retrospective
-Datasheet for BookCorpus, J. Bandy and N. Vincent (2021).
-5 ByT5: Towards a token-free future with pre-trained byte-to-byte models, L. Xue et al. (2021)
-6 A New Algorithm for Data Compression, P. Gage (1994)
-9 Language Models are Few-Shot Learners, T. Brown et al. (2020)
-11 Evaluating Large Language Models Trained on Code, M. Chen et al. (2021)
-
-
