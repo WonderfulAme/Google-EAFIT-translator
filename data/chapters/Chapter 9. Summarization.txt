@@ -742,10 +742,3 @@ we have access to a lot of data or if the data is very different to the training
 of existing models (e.g. DNA sequences or musical notes.). In the next chapter
 we have a look at what it takes to train a model from scratch on multiple GPUs
 in parallel.
-
-1 Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer, C. Raffel et al.
-(2019)
-2 BART: Denoising Sequence-to-Sequence Pre-training for Natural Language Generation,
-Translation, and Comprehension, M. Lewis et al. (2019)
-3 PEGASUS: Pre-training with Extracted Gap-sentences for Abstractive Summarization, J. Zhang et
-al. (2019)
