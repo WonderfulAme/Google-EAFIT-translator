@@ -723,17 +723,3 @@ documentation that provides you with the information needed to get started.
 Now that we have a better understanding of the underlying principles let’s
 go beyond simple classification and build a question-answering model in
 the next chapter.
-
-1 Sequence to Sequence Learning with Neural Networks, I. Sutskever et al. (2014)
-2 Neural Machine Translation by Jointly Learning to Align and Translate, D. Bahdanau, K.
-Cho, and Y. Bengio (2014)
-3 Text Summarization with Pretrained Encoder, Y. Liu and M. Lapata (2019)
-4 Deep contextualized word representations, M.E. Peters et al (2017)
-5 In fancier terminology, the self-attention and feed-forward layers are said to be permutation
-equivariant - if the input is permuted then the corresponding output of the layer is permuted in
-exactly the same way.
-6 GLUE: A Multi-Task Benchmark and Analysis Platform for Natural Language
-Understanding, A. Wang et al (2018)
-7 SuperGLUE: A Stickier Benchmark for General-Purpose Language Understanding Systems,
-A. Wang et al (2019)
-8 Scaling Laws for Neural Language Models, J. Kaplan et al (2020)
