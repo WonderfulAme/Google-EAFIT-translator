@@ -1091,17 +1091,3 @@ natural language generation (NLG) tasks, where both the input and the
 output consist of text. In the next chapter we explore how to train models
 for summarization where the input is a long texts and the output is a short
 text with its summary.
-
-1 Unsupervised Data Augmentation for Consistency Training, Q. Xie et al. (2019)
-2 Uncertainty-Aware Self-Training for Few-Shot Text Classification, S. Mukherjee et al. (2020)
-3 We thank Joe Davison for suggesting this approach to us.
-4 A Broad-Coverage Challenge Corpus for Sentence Understanding through Inference, A.
-Williams et al. (2018)
-5 XNLI: Evaluating Cross-lingual Sentence Representations, A. Conneau et al. (2018)
-
-6 EDA: Easy Data Augmentation Techniques for Boosting Performance on Text Classification
-Tasks, J. Wei and K. Zou (2019)
-7 Language Models are Few-Shot Learners, T. Brown et al. (2020)
-8 Improving and Simplifying Pattern Exploiting Training, D. Tam et al. (2021)
-9 How Many Data Points is a Prompt Worth?, T. Le Scao (2021)
-
