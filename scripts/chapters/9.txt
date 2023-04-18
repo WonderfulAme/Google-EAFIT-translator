@@ -1,0 +1,744 @@
+Chapter 9. Summarization
+A NOTE FOR EARLY RELEASE READERS
+With Early Release ebooks, you get books in their earliest form—the
+author’s raw and unedited content as they write—so you can take
+advantage of these technologies long before the official release of these
+titles.
+This will be the 9th chapter of the final book. Please note that the GitHub
+repo will be made active later on.
+If you have comments about how we might improve the content and/or
+examples in this book, or if you notice missing material within this chapter,
+please reach out to the editor at mpotter@oreilly.com.
+At one point or another, you’ve probably needed to summarize a document, be
+it a research article, financial earnings report, or thread of emails. If you think
+about it, this requires a range of abilities such as understanding long passages,
+reasoning about the contents, and producing fluent text that incorporates the
+main topics from the document. Moreover, summarizing a news article is very
+different to summarizing a legal contract, so being able to do so requires a
+sophisticated degree of domain generalization. For these reasons, text
+summarization is a difficult task for neural language models, including
+Transformers. Despite these challenges, text summarization offers the prospect
+for domain experts to significantly speed up their workflows and is used by
+enterprises to condense internal knowledge, summarize contracts, or
+automatically generate content for social media releases.
+To understand these challenges, this chapter will explore how we can leverage
+pretrained transformers to summarize documents. Let’s begin by taking a look
+at one of the canonical datasets for summarization: news articles from the
+CNN/DailyMail corpus.
+
+The CNN/DailyMail Dataset
+The CNN/DailyMail dataset consists of around 300,000 pairs of news articles
+and their corresponding summaries, composed from the bullet points that CNN
+and the DailyMail attach to their articles. An important aspect of the dataset is
+that the summaries are abstractive and not extractive, which means that they
+consist of new sentences instead of simple excerpts. The dataset is also
+available in the HuggingFace Dataset Hub so let’s dive in and have a look at it:
+
+
+The dataset has three features: article which contains the news articles,
+highlights with the summaries and id to uniquely identify each article.
+Let’s look at an excerpt from an article:
+Article (excerpt of 500 characters, total length: 9396):
+It's official: U.S. President Barack Obama wants lawmakers to weigh
+in on
+> whether to use military force in Syria. Obama sent a letter to
+the heads of
+> the House and Senate on Saturday night, hours after announcing
+that he
+> believes military action against Syrian targets is the right step
+to take
+> over the alleged use of chemical weapons. The proposed
+
+legislation from Obama
+> asks Congress to approve the use of military force "to deter,
+disrupt,
+> prevent and degrade the potential for future uses of che
+Summary (length: 294):
+Syrian official: Obama climbed to the top of the tree, "doesn't know
+how to get
+> down"
+Obama sends a letter to the heads of the House and Senate .
+Obama to seek congressional approval on military action against
+Syria .
+Aim is to determine whether CW were used, not by whom, says U.N.
+spokesman .
+
+We see that the articles can be very long compared to the target summary; in
+this particular case the difference is 17-fold. Long articles pose a challenge to
+most Transformer models since the context size is usually limited to 1,000
+tokens or so, which is equivalent to a few paragraphs of text. The standard, yet
+crude way to deal with this for summarization is to simply truncate the texts
+beyond the model’s context size. Obviously there could be important
+information for the summary towards the end of the text, but for now we need
+to live with this limitation of the model architectures.
+
+Text Summarization Pipelines
+Let’s see how a few of the most popular Transformer models for
+summarization perform by first looking qualitatively at the outputs for the
+above example. Although the model architectures we will be exploring have
+varying maximum input sizes, let’s restrict the input text to 2,000 characters to
+have the same input for all models and thus make the outputs more
+comparable:
+
+A convention in summarization is to separate the summary sentences by a
+newline. We could add a newline token after each full stop but this simple
+
+heuristic would fail for strings like “U.S.” or “U.N.”. The nltk package includes
+a more sophisticated algorithm that can differentiate the end of a sentence from
+punctuation that occurs in abbreviations:
+
+['The U.S. are a country.', 'The U.N. is an organization.']
+
+Summarization Baseline
+A common baseline for summarizing news articles is to simply take the first
+three sentences of an article. With nltk’s sentence tokenizer we can easily
+implement such a baseline:
+
+GPT-2
+We’ve already seen in Chapter 8 how GPT-2 can generate text given some
+prompt. One of the model’s surprising features is that it can also generate
+summaries by simply appending “TL;DR” at the end of the input text! The
+expression “TL;DR” (too long; didn’t read) is often used on platforms like
+Reddit to indicate a short version of a long post. We will start the
+summarization experiment by recreating the procedure of the original paper
+with the Transformer pipelines. We create a text generation pipeline and load
+the large GPT-2 model with 1.5 billion parameters:
+
+
+Here we just store the summaries of the generated text by slicing off the input
+query and keep the result in a Python dictionary for later comparison.
+
+Next let’s try the T5 Transformer.1 With T5, the authors performed a
+comprehensive study of transfer learning in NLP and found they could create a
+universal Transformer architecture by formulating all tasks in a text-to-text
+framework. The T5 checkpoints provided on the HuggingFace Model Hub are
+trained on a mixture of unsupervised data (trained to reconstruct masked
+words) and supervised data for several tasks including summarization. These
+checkpoints can thus be directly used to perform summarization without finetuning by using the same prompts used during pretraining when the model is
+trained on supervised summarization. In this framework, the input format for
+the model to summarize a document is "summarize <ARTICLE> or for
+translation it is translate English to German <TEXT>". As shown
+in Figure 9-1, this makes T5 extremely versatile and allows you to solve many
+tasks with a single model.
+
+Figure 9-1. Diagram of T5’s text-to-text framework (courtesy of Colin Raffel).
+
+We can directly load T5 for summarization with the pipeline which also takes
+care of formatting the inputs in the text-to-text format so we don’t need to
+prepend "summarize" to the text:
+BART
+BART2 is a novel transformer architecture with both an encoder and decoder
+stack trained to reconstruct corrupted input that combines the pretraining
+schemes of both BERT and GPT-2. The model facebook/bart-largecnn has been specifically fine-tuned on the CNN/DailyMail dataset:
+
+PEGASUS
+Like BART, PEGASUS3 is a fully-fledged Transformer with an encoder and
+decoder. As shown in Figure 9-2, its pretraining objective is to predict masked
+sentences in multi-sentence texts. The authors argue that the closer the
+pretraining objective is to the downstream task the more effective it is. By
+aiming to find a pretraining objective that is closer to summarization than
+general language modeling, the authors automatically identified, in a very large
+corpus, sentences containing most of the content of their surrounding
+paragraphs (using summarization evaluation metrics as a heuristic for content
+overlap) and pre-trained the PEGASUS model to reconstruct these sentences
+thereby obtaining a state-of-the-art model for text summarization.
+
+Figure 9-2. Diagram of Pegasus’ architecture (courtesy of Jingqing Zhang et al).
+
+This model has a special token for newlines which is why we don’t need the
+sent_tokenize function:
+
+Comparing Different Summaries
+Now that we have generated summaries with four different models lets
+compare the results. Keep in mind that one model has not been trained on the
+dataset at all (GPT-2), one model has been fine-tuned on this task among others
+(T5) and two models have exclusively been fine-tuned on this task (BART and
+PEGASUS).
+
+It's official: U.S. President Barack Obama wants lawmakers to weigh
+in on
+> whether to use military force in Syria. Obama sent a letter to
+the heads of
+> the House and Senate on Saturday night, hours after announcing
+that he
+> believes military action against Syrian targets is the right step
+to take
+> over the alleged use of chemical weapons. The proposed
+legislation from Obama
+> asks Congress to approve the use of military force "to deter,
+disrupt,
+> prevent and degrade the potential for future uses of chemical
+weapons or
+> other weapons of mass destruction." It's a step that is set to
+turn an
+> international crisis into a fierce domestic political battle.
+
+There are key
+> questions looming over the debate: What did U.N. weapons
+inspectors find in
+> Syria? What happens if Congress votes no? And how will the Syrian
+government
+> react? In a televised address from the White House Rose Garden
+earlier
+> Saturday, the president said he would take his case to Congress,
+not because
+> he has to -- but because he wants to. "While I believe I have the
+authority
+> to carry out this military action without specific congressional
+> authorization, I know that the country will be stronger if we
+take this
+> course, and our actions will be even more effective," he said.
+"We should
+> have this debate, because the issues are too big for business as
+usual."
+> Obama said top congressional leaders had agreed to schedule a
+debate when the
+> body returns to Washington on September 9. The Senate Foreign
+Relations
+> Committee will hold a hearing over the matter on Tuesday, Sen.
+Robert
+> Menendez said. Transcript: Read Obama's full remarks . Syrian
+crisis: Latest
+> developments . U.N. inspectors leave Syria . Obama's remarks came
+shortly
+> after U.N. inspectors left Syria, carrying evidence that will
+determine
+> whether chemical weapons were used in an attack early last week
+in a Damascus
+> suburb. "The aim of the game here, the mandate, is very clear -and that is
+> to ascertain whether chemical weapons were used -- and not by
+whom," U.N. spo
+GROUND TRUTH
+Syrian official: Obama climbed to the top of the tree, "doesn't know
+how to get
+> down"
+Obama sends a letter to the heads of the House and Senate .
+Obama to seek congressional approval on military action against
+Syria .
+Aim is to determine whether CW were used, not by whom, says U.N.
+spokesman .
+BASELINE
+It's official: U.S. President Barack Obama wants lawmakers to weigh
+in on
+
+> whether to use military force in Syria.
+Obama sent a letter to the heads of the House and Senate on Saturday
+night,
+> hours after announcing that he believes military action against
+Syrian
+> targets is the right step to take over the alleged use of
+chemical weapons.
+The proposed legislation from Obama asks Congress to approve the use
+of military
+> force "to deter, disrupt, prevent and degrade the potential for
+future uses
+> of chemical weapons or other weapons of mass destruction."
+GPT2
+Syria Chemical Weapons Scandal: Who's Responsible.
+Who Has Nothing To Do With It?
+Who is responsible for the chemical-weapons attack in Qusair?
+Who has nothing to do with it?
+President Obama said Saturday that he did not want to take this
+issue to
+> Congress, but did so because he wanted a public debate on the use
+of military
+> force.
+But does he really want to have that discussion?
+What did the Syrian government, opposition forces and their allies
+really do
+> last week there, and will we ever get those answers?
+Here's why
+T5
+president sends a letter to the heads of the house and senate .
+he wants lawmakers to weigh in on whether to use military force in
+Syria .
+the president says he will take his case to congress, not because he
+has to .
+"we should have this debate, because the issues are too big for
+business as
+> usual," he says .
+BART
+Obama sends a letter to the heads of the House and Senate.
+He wants Congress to approve the use of military force in Syria.
+"We should have this debate, because the issues are too big for
+business as
+> usual," he says.
+The Senate Foreign Relations Committee will hold a hearing over the
+matter on
+> Tuesday.
+PEGASUS
+
+Obama sends a letter to the heads of the House and Senate.
+He asks Congress to approve the use of military force.
+Obama: "We should have this debate, because the issues are too big
+for business
+> as usual"
+
+The first thing we notice by looking at the model outputs is that the summary
+generated by GPT-2 is quite different in flavor to the others, which is not so
+surprising since the model was not explicitly trained for this task. When we
+compare the content of GPT-2’s summary to the input text we notice that the
+model “hallucinates” and invents quotes and facts that are not part of the text.
+Comparing the other three model summaries against the ground truth we see
+that there is remarkable overlap.
+Now that we have subjectively evaluated a few models, let’s try to decide
+which model we would use in a production setting. All three models (T5,
+BART, and PEGASUS) seem to provide reasonable qualitative results, and we
+could generate a few more examples to decide. However, this is not a
+systematic way of determining the best model! Ideally, we would define a
+metric, measure it for all models on some benchmark dataset, and take the one
+with the best performance. But how do you define a metric for text generation?
+The standard metrics that we’ve seen like accuracy, recall, and precision are not
+easy to apply to this task. For each “gold” summary, written by a human,
+dozens of other summaries with synonyms, periphrases or a slightly different
+way of formulating facts could just as acceptable.
+In the next section we look at some common metrics that have been developed
+for measuring the quality of generated text.
+
+Measuring the Quality of Generated Text
+Good evaluation metrics are important since we use them to measure the
+performance of models not only when we train them but also later on in
+production. If we have bad metrics we might be blind to model degradation and
+if they are misaligned with the business goals we might not create any value.
+Measuring the performance of text generation is not as easy as with standard
+classification tasks such as sentiment analysis or named entity recognition.
+
+Take the example of translation; given a sentence like “I love dogs!” in English
+and translating it to Spanish there can be multiple valid possibilities like “¡Me
+encantan los perros” or “¡Me gustan los perros!”. Simply comparing exact
+matching to a reference translation is not optimal and even humans would fare
+badly on such a metric just because we all write text sightly differently from
+each other and even from ourselves depending on the time of the day or year.
+This doesn’t look like a good solution.
+Two of the most common metrics used to evaluate generated text are BLEU
+and ROUGE. Let’s take a look at how they’re defined.
+
+BLEU
+The idea of BLEU is simple: instead of looking at how many of the tokens in
+the generated texts are perfectly aligned with the reference text tokens, we
+compare the occurring words or n-grams between the texts. BLEU is a
+precision-based metric which means that when we compare the two texts we
+count the number of words in the generation that occur in the reference and
+divide it by the length of the reference.
+However, there is an issue with this vanilla precision. Assume the generated
+text just repeats the same word over and over again and this word also appears
+in the reference. If it is repeated as many times as the length of the reference
+text, then we get perfect precision! For this reason the authors of the BLEU
+paper introduced a slight modification: a word is only counted as many times
+as it occurs in the reference. Let’s illustrate this point with the following
+generation and reference:
+Reference text: the cat is on the mat
+Sample of generate text: the the the the the the
+From this simple example we can calculate the precision values as follows:
+
+and we can see that the simple correction has produced a much more
+reasonable value. Now let’s extend this by not only looking at single words but
+n-grams as well. Let’s assume we have one generated sentence snt that we
+want to compare against a reference sentence snt . We extract all possible ngrams of degree n and do the accounting to get the precision p :
+
+
+The definition of a sentence is not very strict in this equation, and if you had a
+generated text spanning multiple sentences you would treat it as one sentence.
+In general we have more than one sample in the test set we want to evaluate, so
+we need to slightly extend the equation by summing over all samples as well:
+
+We are almost there. Since we are not looking at recall, all generated sequences
+that are short but precise have a benefit against sentences that are longer.
+Therefore the precision scores favors short generations. To compensate for that
+the authors introduced an additional term, the brevity penalty:
+
+By taking the minimum, we ensure that this penalty never exceeds 1 and the
+exponential term becomes exponentially small when the length of the generated
+text l is smaller than the reference text l . At this point you might ask why
+don’t we just use something like F 1-score to account for recall as well? The
+answer is that often in translation datasets there are multiple reference
+sentences instead of just one, so if we also measured recall we would
+incentivize translations that used all words from all translations. Therefore, it is
+easier to say we look for high precision in the translation and make sure the
+translation have a similar length.
+gen
+
+
+Finally, we can put everything together and get the equation for the BLEU
+score:
+
+
+The last term is the geometric mean of the modified precision up to n-gram N .
+In practice the BLEU-4 score is often used and has been shown to correlate
+with human perception of text quality on some benchmarks. However you can
+probably already see that this metric has many limitations; for instance it
+doesn’t take synonyms into account and many steps in the above derivation
+seem ad-hoc and rather fragile heuristics.
+In general the field of text generation is still looking for better evaluation
+metrics, and finding ways to overcome the limits of metrics like BLEU is an
+active area of research. One weakness of the BLEU metric is that it expects the
+text to already be tokenized. This can lead to varying results if the exact same
+method for text tokenization is not used. The sacrebleu metric adresses this
+issue by internalizing the tokenization step. For this reason it is the preferred
+metric for benchmarking.
+We’ve now worked through some theory but what we really want to do is
+calculate the score for some generated text. Does that mean we need to
+implement all this logic in Python? Fear not, the Datasets library also provides
+metrics! Loading a metric works just like loading a dataset:
+
+Produces BLEU scores along with its sufficient statistics
+from a source against one or more references.
+
+smooth: The smoothing method to use
+smooth_value: For 'floor' smoothing, the floor to use
+force: Ignore data that looks already tokenized
+lowercase: Lowercase the data
+tokenize: The tokenizer to use
+
+
+The Metric object works like an aggregator: you can add single instances
+with Metric.add or whole batches via Metric.add_batch. Once you
+have added all the samples you need to evaluate, you then call
+Metric.compute and the metric is calculated. This returns a dictionary with
+several values, such as the precision for each n-gram, the length penalty as well
+as the final BLEU score. Let’s look at the example from before:
+
+
+NOTE
+The BLEU score also works if there are multiple reference translations. This is why the
+reference translation is passed as a list. To make the metric smoother for zero counts in
+the n-grams, BLEU integrates methods to modify precision calculation. One method is to
+add a constant to the numerator which is called floor. That way a missing n-gram does not
+cause the score to automatically go to zero. For the purpose of explaining the values we turn
+it off by setting smooth_value=0.
+
+We can see the precision of the 1-gram is indeed 2/6 whereas the precision for
+the 2/3/4-grams are all zero. This means the geometric mean is zero and thus
+also the BLEU score. Let’s look at another example where the prediction is
+almost correct:
+
+
+
+
+We observe that the precision scores are much better. The 1-grams in the
+prediction all match and only in the precision scores we see that something is
+off. For the 4-gram there are only two candidates ['the', 'cat', 'is',
+'on'] and ['cat', 'is', 'on', 'mat'] where the last one does not
+match and hence the precision of 0.5.
+The BLEU score is widely used for evaluating text especially in machine
+translation, since precise translations are usually favored over translation that
+include all possible and appropriate words.
+There are other applications such as summarization where the situation is
+different. There we want all important information in the generated text so we
+favor high recall. This is where the ROUGE score is usually used.
+
+ROUGE
+The ROUGE score was specifically developed for applications like
+summarization where high recall is more important than just precision. The
+approach is very similar to the BLEU score in that we look at different n-grams
+and compare their occurrences between generated text and the references. The
+difference between BLEU and ROUGE is that with ROUGE we check how
+many n-grams in the reference text also occur in the generated text. For BLEU
+
+we looked at how many tokens in the generated text appear in the reference. So
+we can reuse the precision formula with a minor modification that we count the
+(unclipped) occurrence of reference n-grams in generated texts in the
+numerator:
+
+This was the original proposal for ROUGE. Since then people found that fully
+removing precision can have strong negative effects. Going back to the BLEU
+formula without the clipped counting, we can measure precision as well and we
+can then combine both precision and recall ROUGE scores in the harmonic
+mean to get an F 1-score. This F 1 score is the metric that is nowadays
+commonly reported for ROUGE.
+There is a separate score in ROUGE to measure the longest common substring
+(LCS) called ROUGE-L. The LCS can be calculated for any pair of strings. For
+example, the LCS for “abab” and “abc” would be “ab” and its the length would
+be 2. If we want to compare this value between two samples we need to
+somehow normalize it, otherwise a longer texts would be at an advantage. To
+achieve this, the inventor of ROUGE came up with an F -score-like scheme
+where the LCS is normalized with the length of the reference and generated
+text. Then the two normalized scores are mixed together:
+
+
+That way the LCS score is properly normalized and can be compared across
+samples. In the Datasets implementation, two variations of it are calculated:
+one calculates per sentence and averages it for the summaries (ROUGE-L) and
+the other second one calculates it directly over the whole summary (ROUGELsum).
+
+Let’s calculate the ROUGE scores for the generated summaries of the models:
+
+
+We already generated a set of summaries with GPT-2 and the other models, and
+now we have a metric to compare the summaries systematically. So let’s apply
+the ROUGE score to all the summaries of the models:
+
+NOTE
+The ROUGE metric that is implemented in Datasets also calculates confidence intervals (by
+default the 5th and 95th percentiles). The average value is stored in the attribute mid and the
+interval can be retrieved with low and high.
+
+These results are obviously not very reliable as we only looked at a single
+sample, but we can compare the quality of the summary for that one example.
+The table confirms our observation that GPT-2 clearly performs worst among
+the models. This is not surprising since it is the only model of the group that
+was not explicitly trained to summarize. It is striking that the simple first three
+sentence baseline comes close to the transformer models that have on the order
+of 1 billion parameters! PEGASUS seems to outperform BART across all
+metrics and performs best on the ROUGE-2 metric across all models, but T5 is
+slightly better on ROUGE-1 and the LCS scores. Considering that we used t5large which has 11bn parameters as compared to PEGASUS which has 500
+million parameters (5%!) this is remarkable result. While this result place
+PEGASUS as the best model among our three models and seems consistent
+with the PEGASUS paper which showed state-of-the-art results, it’s obviously
+not a reliable evaluation procedure since we evaluated the models on a single
+example only.
+Let’s thus go one step further and evaluate the model on the whole test set of
+our benchmarks.
+
+Evaluating PEGASUS on the CNN/DailyMail
+Dataset
+We now have all the pieces in place to evaluate the model properly: we have a
+dataset with a test set from CNN/DailyMail, we have a metric with ROUGE
+and we have a fine-tuned model. So we just need to put the pieces together.
+Let’s first evaluate the performance of the three sentence baseline:
+
+Now we apply the function to a subset of the data. Since the test fraction of the
+CNN/DailyMail dataset consists of roughly 10,000 samples, generating
+summaries for all these articles takes a lot of time. For the purpose of keeping
+the calculations relatively fast, we subsample the test set and run the evaluation
+on 1,000 samples instead. This should give us a much more stable score
+estimation while completing in less than one hour on a single GPU for the
+PEGASUS model:
+baseline
+
+The scores are significantly worse than on the previous example, but still better
+than GPT-2! Let’s implement the same function for evaluating the PEGASUS
+model:
+
+
+Let’s unpack this evaluation code a bit. First we split the dataset into smaller
+batches that we can process simultaneously. Then for each batch we tokenize
+the input articles and feed them to the generate function to produce the
+summaries using beam search. Finally, we decode the generated texts, replace
+the <n> token, and add the decoded texts with the references to the metric. At
+the end we compute and return the ROUGE scores.
+
+These scores are not bad, but still slightly off the published results which could
+be explained by the fact that in the paper a different text generation function
+was used. This highlights the importance of the decoding strategy since
+different settings lead to generated texts that have more or less overlap with the
+ground truth which impacts the ROUGE scores. That means the loss and pertoken accuracy are decoupled to some degree from the ROUGE scores. Since
+ROUGE and BLEU correlate better with human judgment we should focus on
+them and therefore carefully explore and choose the decoding strategy when
+building a text generation models.
+
+Training Your Own Summarization Model
+We worked through a lot of details on text summarization and evaluation so
+let’s finally put it to use to train a custom text summarization model! For our
+application, we’ll use the SAMSum dataset developed by Samsung which
+consists of a collection of dialogues along with their summaries. In an
+enterprise setting, these dialogues might represent the interactions between a
+customer and the support center, so generating accurate summaries of the
+conversation can help improve customer service and detect common patterns
+among customer requests. Let’s load it and look at an example:
+
+
+Dialogue:
+Hannah: Hey, do you have Betty's number?
+Amanda: Lemme check
+Hannah: <file_gif>
+Amanda: Sorry, can't find it.
+Amanda: Ask Larry
+Amanda: He called her last time we were at the park together
+Hannah: I don't know him well
+Hannah: <file_gif>
+Amanda: Don't be shy, he's very nice
+Hannah: If you say so..
+Hannah: I'd rather you texted him
+Amanda: Just text him :)
+Hannah: Urgh.. Alright
+Hannah: Bye
+Amanda: Bye bye
+Summary:
+Hannah needs Betty's number but Amanda doesn't have it. She needs to
+contact
+> Larry.
+
+The dialogues look like what you would expect from a chat via SMS or
+WhatsApp including emojis and and placeholder for GIFs. Could a model that
+
+was fine-tuned on the CNN/DailyMail dataset deal with that at all? Let’s find
+out!
+
+Evaluating PEGASUS on SAMSum
+First we run the same summarization pipeline with PEGASUS to see what the
+output looks like. We can reuse the code we used for the CNN/DailyMAil
+summary generation.
+Summary:
+Amanda: Ask Larry 
+Amanda: He called her last time we were at the
+park together.
+Hannah: I'd rather you texted him.
+Amanda: Just text him .
+
+We can see that the model mostly tries to summarize by extracting the key
+sentences from the dialogue. This probably worked relatively well on the
+CNN/DailyMail dataset but the summaries in SAMSum are more abstract. Let’s
+confirm this by running the full ROUGE evaluation on the test set.
+
+Well, the results are not great but this is also not unexpected since we moved
+quite a bit away from the CNN/DailyMail distribution. Nevertheless setting up
+the evaluation pipeline before training has two advantages: we can directly
+measure the success of training with the metric and we have a good baseline.
+By fine-tuning the model on our dataset, the ROUGE metric should get
+immediately better and if that is not the case we know something is wrong with
+our training loop.
+
+Fine-Tuning PEGASUS
+Before we process the data for training let’s have a quick look at the length
+distribution of the input and outputs:
+
+
+We see that most dialogues are much shorter than the CNN/DailyMail articles
+with 100-200 tokens per dialogue. Similarly, the summaries are much shorter,
+with around 20-40 tokens (the average length of a tweet).
+Creating A Custom Data Collator
+Let’s keep that in mind when we build the data collator for the Trainer. First
+we need to tokenize the dataset and for now we set the maximum length to
+1024 and 128 for the dialogues and summaries, respectively:
+def convert_examples_to_features(example_batch):
+
+Now, we need to create the data collator. This function is called in the
+Trainer just before the batch is fed through the model. In most cases we can
+
+use the the default collator which collects all the tensors from the batch and
+simply stacks them. For the summarization task we need to implement two
+extra steps: trim the batches to reduce unnecessary padding and prepare the
+decoder inputs and labels.
+When looking at the sequence lengths, we saw that they vary greatly and most
+of them are much shorter than the maximum lengths of 1024 and 128 for the
+dialogues and summaries. Since the forward pass scales like O(N ) with the
+input sequence length, we should not be wasteful with our compute and pass
+inputs that are unnecessarily long. Ideally, the input length for each batch
+would be the maximum sequence length in that batch, not the global one. We
+can do this in the collator by dropping all columns in the batch that only
+contain padding tokens. The following function trim_batch does the job:
+
+
+Now all that is left is to prepare the labels and decoder inputs. PEGASUS is a
+encoder-decoder transformer and thus has the classic sequence-to-sequence
+(seq2seq) architecture. In a seq2seq setup, a common approach is to apply
+“teacher-forcing” in the decoder. The decoder also receives input tokens (like
+decoder-only models such as GPT-2) which consists of the labels shifted by
+one in addition to the encoder output. So when making the prediction for the
+next token the decoder gets the ground truth shifted by one as an input which is
+illustrated in table [Link to Come]. We shift it by one so that the decoder only
+sees the previous ground truth labels and not the current or future ones.
+Shifting alone suffices since the decoder has masked self-attention that masks
+all inputs at present and in the future.
+
+
+So when we prepare our batch we set up the decoder inputs by shifting the
+labels to the right by one. After that we make sure the padding tokens in the
+labels are ignored by the loss function by setting them to -100. Now we set up
+the data collator, which is just a function taking a list of dictionaries as input:
+
+When working on this chapter we noticed that training on a sample of the
+dataset outperformed the model trained on the full dataset in terms of ROUGE
+score. This was somewhat surprising since the validation loss monotonically
+decreased when training the model with more data. This is potentially
+connected to the fact that the loss reflects the next token prediction quality,
+which does not necessarily reflect the text generation capability.
+To investigate this we loop over different fractions of an epoch, fine-tune a
+model, and run the ROUGE evaluation. We also save the model with the best
+ROUGE-2 score.
+
+We can now plot the ROUGE scores as a function of epoch fraction:
+
+We get the best ROUGE scores at epochs=0.15 which corresponds to
+approximately 2,000 samples. The score there looks indeed much better than
+the scores we got initially so fine-tuning on the dataset definitely paid off.
+Finally, we want to look at a few examples of summaries we can now generate
+with the fine-tuned model.
+
+Generating Dialogue Summaries
+Looking at the losses and ROUGE scores it seems the model improved over the
+original model trained on CNN/DailyMail only. Let’s check again on the
+sample from the test set we looked at previously:
+
+Dialogue:
+Hannah: Hey, do you have Betty's number?
+Amanda: Lemme check
+Hannah: <file_gif>
+Amanda: Sorry, can't find it.
+Amanda: Ask Larry
+Amanda: He called her last time we were at the park together
+Hannah: I don't know him well
+Hannah: <file_gif>
+Amanda: Don't be shy, he's very nice
+Hannah: If you say so..
+Hannah: I'd rather you texted him
+Amanda: Just text him :)
+Hannah: Urgh.. Alright
+Hannah: Bye
+Amanda: Bye bye
+
+Reference Summary:
+Hannah needs Betty's number but Amanda doesn't have it. She needs to
+contact
+> Larry.
+Model Summary:
+Hannah is looking for Betty's number. Amanda doesn't know Betty's
+new number.
+> Larry called her last time they were at the park together.
+
+That looks much more like the reference sentence. It seems the model has
+learned not to synthesize the dialogue into a summary without just extracting
+passages. Now, the ultimate test: how well does the model work on a custom
+input?
+
+Thom: Hi guys, have you heard of transformers?
+Lewis: Yes, I used them recently!
+Leandro: Indeed, there is a great library by Hugging Face.
+Thom: I know, I helped build it ;)
+Lewis: Cool, maybe we should write a book about it. What do you
+think?
+Leandro: Great idea, how hard can it be?!
+Thom: I am in!
+Lewis: Awesome, let's do it together!
+"""
+Leandro, Thom and Lewis are planning to write a book about
+transformers and
+> Hugging Face. Leandro and Lewis are in the process of writing the
+book
+> together.
+Leandro, Thom and Lewis are planning to write a book about
+transformers.
+> Leandro, Lewis and Thom will do it together. Leandro and Lewis
+are in for it.
+Leandro, Thom and Lewis are planning to write a book about
+transformers. They
+> will do it together. Leandro, Lewis and Thom are all in for it.
+Leandro, Thom and Lewis are going to write a book about
+transformers. They will
+> do it together. Leandro and Lewis think it's a great idea.
+Leandro, Thom and Lewis are going to write a book about transformers
+and Hugging
+> Face. Leandro and Lewis are in the process of writing the book
+together.
+
+Most of the generated texts make sense. Some of them mix up who actually
+writes the book but the third example gets it right!
+
+Conclusion
+Text summarization poses some unique challenges compared to other tasks that
+can be framed as classification like sentiment analysis, named entity
+
+recognition, or question answering. Conventional metrics such as accuracy do
+not reflect the quality of the generated text. There is also a discrepancy between
+the loss function and human judgment that is not easy to bridge. Finally, when
+generating text, we use decoding strategies which are different from the
+training routine. For this reason it is important to look at metrics like BLEU or
+ROUGE to get a better judgment of the model’s performance.
+So far in this book we have always used pretrained models and fine-tuned them
+on down-stream tasks with transfer learning. This allows us to efficiently finetune models on a single GPU and requires very little training data. However,
+there are settings where training from scratch can make sense. For example if
+we have access to a lot of data or if the data is very different to the training data
+of existing models (e.g. DNA sequences or musical notes.). In the next chapter
+we have a look at what it takes to train a model from scratch on multiple GPUs
+in parallel.

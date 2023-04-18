@@ -1,0 +1,1361 @@
+Chapter 10. Training
+Transformers from Scratch
+A NOTE FOR EARLY RELEASE READERS
+With Early Release ebooks, you get books in their earliest form—the
+author’s raw and unedited content as they write—so you can take
+advantage of these technologies long before the official release of these
+titles.
+This will be the 10th chapter of the final book. Please note that the
+GitHub repo will be made active later on.
+If you have comments about how we might improve the content and/or
+examples in this book, or if you notice missing material within this
+chapter, please reach out to the editor at mpotter@oreilly.com.
+In Chapter 1 we looked at a sophisticated application called GitHub Copilot
+that uses a GPT-like transformer to generate code from a variety of
+prompts. Tools like Copilot enable programmers to write code more
+efficiently by generating a lot of the boilerplate code automatically or by
+detecting likely mistakes. Later in Chapter 8 we had a closer look at GPTlike models and how we can use them to generate high-quality text. In this
+chapter we complete the circle and build our very own code generation
+model based on the GPT architecture! Since programming languages use a
+very specific syntax and vocabulary that is distinct from natural language, it
+makes sense to train a new model from scratch rather than fine-tune an
+existing one.
+So far we’ve mostly worked on data-constrained application where the
+amount of labeled training data is limited. In these cases, transfer learning –
+in which we start from a model pretrained on a much larger corpus – helped
+
+us build performant models. The transfer learning approach peaked in
+Chapter 7 where we barely used any training data at all.
+In this chapter we’ll move to the other extreme; what can we do when we
+are drowning with data? With that question we will explore the pretraining
+step itself and learn how to train a transformer from scratch. Solving this
+task will show us aspects of training that we have not paid attention to yet:
+Gathering and handling a very large dataset.
+Creating a custom tokenizer for our dataset.
+Training a model at scale.
+To efficiently train large models with billions of parameters, we’ll need
+special tools for distributed training and pipelining. Fortunately there is a
+library called Hugging Face Accelerate which is designed for precisely
+these applications! We’ll end up touching on some of the largest NLP
+models today.
+TODO add picture of transfer learning from chapter 1 with focus on
+pretraining?
+
+Large Datasets and Where to Find Them
+There are many domains and tasks where you may actually have a large
+amount of data at hand. These range from legal documents, to biomedical
+datasets, and even programming codebases. In most cases, these datasets
+are unlabeled and their large size means that they can usually only be
+labeled through the use of heuristics or by using accompanying metadata
+that is stored during the gathering process. For example, given a corpus of
+Python functions, we could separate the docstrings from the code and treat
+them as the targets we wish to generate in a seqs2seq task.
+A very large corpus can be useful even when it is unlabeled or only
+heuristically-labeled. We saw an example of this in Chapter 7 where we
+used the unlabeled part of a dataset to fine-tune a language model for
+
+domain adaptation, which yielded a performance gain especially in the low
+data regime. Here are some high-level examples that we will illustrate in the
+next section:
+If an unsupervised or self-supervised training objective similar to
+your downstream task can be designed, you can train a model for
+your task without labeling your dataset.
+If heuristics or metadata can be used to label the dataset at scale
+with labels related to your downstream task, it’s also possible to
+use this large dataset to train a model useful for your downstream
+task in a supervised setting.
+The decision to train from scratch rather than fine-tune an existing model is
+mostly dictated by the size of your fine-tuning corpus and the diverging
+domain between the available pretrained models and the corpus.
+In particular, using a pretrained model forces you to use the tokenizer
+associated with this pretrained model. But using a tokenizer that is trained
+on a corpus from another domain is typically sub-optimal. For example,
+using GPT’s pretrained tokenizer on another field such as legal documents,
+other languages or even completely different sequences such as musical
+notes or DNA sequences will results in bad tokenization as we will see
+shortly.
+As the amount of training dataset you have access to gets closer to the
+amount of data used for pretraining, it thus becomes interesting to consider
+training the model and the tokenizer from scratch. Before we discuss the
+different pretraining objectives further we first need to build a large corpus
+suitable for pretraining which comes with its own set of challenges.
+
+Challenges with Building a Large Scale Corpus
+The quality of a model after pretraining largely reflects the quality of the
+pretraining corpus, and defect in the pretraining corpus will be inherited by
+the model. Thus, this is a good occasion to discuss some of the common
+
+issues and challenges that are associated with building large corpora suited
+for pretraining before creating our own.
+As the dataset gets larger and larger, the chances that you can fully control –
+or at least have a precise idea of – what is inside the dataset diminish. A
+very large dataset will most likely not have been created by dedicated
+creators that craft one example at a time, while being aware and
+knowledgeable of the full pipeline and task that the machine learning model
+will be applied to. Instead it is much more likely that a very large dataset
+will have been created in an automatic or semi-automatic way by collecting
+data that is generated as a side effect of other activities; for instance as data
+sent to a company for a task that the user is performing, or gathered on the
+Internet in a semi-automated way.
+There are several important consequences that follow from the fact that
+large-scale datasets are mostly created with a high degree of automation.
+There is limited control on both their content and the way they are created,
+and thus the risk of training a model on biased and lower quality data
+increases. Good examples of this are recent investigations on famous large
+scale datasets like BookCorpus1 or C42, which were used to train BERT
+and T5 respectively and are two models we have used in previous chapters.
+These “after-the-fact” investigations have uncovered among other things:
+A significant proportion of the C4 corpus is machine translated
+with automatic methods rather than humans.3
+Disparate erasure of African-American English as a result of stopwords filtering in C4 produced an under-representation of such
+content.
+It is typically difficult in a large text corpus to find a middle
+ground between (1) including (often too much) sexually-explicit or
+other type of explicit content or (2) totally erasing all mention of
+sexuality or gender and, as a consequence, any legitimate
+discussion around these questions. As a surprising consequence of
+this, tokenizing a rather common word like “sex” with a neutral
+meaning in addition to an explicit one is unnatural for a tokenizer
+
+that is trained on C4 since this word is fully absent from the corpus
+and thus completely unknown.
+Many occurrences of copyright violation in BookCorpus and
+probably in other large scale datasets as well.4
+Genre skew toward “romance” novels in BookCorpus
+These discoveries might not be incompatible with downstream usage of the
+models trained on these corpus. For instance the strong over-representation
+of “romance” novels in BookCorpus is probably fine if the model is
+intended to be used as a romance novel writing tool (for instance to help
+overcome creative angst) or game.
+Let’s illustrate the notion of a model being skewed by the data by
+comparing text generations from GPT which was trained in large part on
+BookCorpus and GPT-2 which was trained on webpages/blogs/news linked
+to from Reddit. We compare similar sized versions of both models on the
+same prompt so that the main difference is the training dataset. We’ll use
+the text generation pipeline to investigate the model outputs:
+
+
+Next let’s create a simple function to count the number of parameters in
+each model:
+
+Now we can generate 3 different completions from each model, each with
+the same input prompt:
+
+1.
+When they came back.
+" we need all we can get, " jason said once they had settled
+into the back of
+the truck without anyone stopping them. " after getting out
+here, it 'll be
+up to us what to find. for now
+2.
+When they came back.
+his gaze swept over her body. he 'd dressed her, too, in the
+borrowed clothes
+that she 'd worn for the journey.
+" i thought it would be easier to just leave you there. " a
+woman like
+3.
+When they came back to the house and she was sitting there with
+the little boy.
+" don't be afraid, " he told her. she nodded slowly, her eyes
+wide. she was so
+lost in whatever she discovered that tom knew her mistake
+
+
+By just sampling a handful of outputs from both models we can already see
+the distinctive “romance” skew in GPT generation which will typically
+imagine two characters of the opposite sex (a woman and a man), and a
+dialog with a romance interaction between them. On the other hand, GPT-2
+was trained on webtext linked to and from Reddit articles and mostly adopts
+a neutral “they” in its generations that contain “blog-like” or adventure
+related elements like travels.
+In general, any model trained on a dataset will reflect the language bias and
+over- or under-representation of populations and events in its training data.
+These biases in the behavior of the model are important to take into
+consideration with regards to the target audience interacting with the model.
+In our case, our programming codebase will be mostly comprised of code
+rather than natural language but we still may want to:
+Balance the programming language we use.
+Filter low quality or duplicated code samples.
+Take the copyright information into account.
+
+Investigate the language contained in the included documentation,
+comments or docstrings, for instance to account for personal
+identifying data.
+This should give a glimpse of the difficult challenges you face when
+creating large text corpora and we refer the reader to a paper by Google
+which provides a framework on dataset development. With these in mind,
+let’s now take a look at creating our own dataset!
+
+Building a Custom Code Dataset
+To simplify the task a bit we’ll focus on building a code generation model
+for the Python programming language (GitHub Copilot supports over a
+dozen languages). The first thing we’ll need then in a large pretraining
+corpus of Python source code. Fortunately there is a natural resource that
+every engineer knows: GitHub itself! The famous code sharing website
+hosts gigabytes of code repositories which are openly accessible and can be
+download and used according to their respective licenses. At the time of this
+book’s writing, GitHub hosts more than 20 million code repositories. Many
+of these are small or test repositories created by users for learning, future
+side-projects or testing purposes. This leads to a somewhat noisy quality of
+these repositories. Let’s look at a few strategies for dealing with these
+quality issues.
+To Filter the Noise or Not?
+Since anybody can create a GitHub repository, the quality of projects is
+very broad. GitHub allows people to “star” repositories which can provide a
+proxy metric for project quality by indicating that other users are interested
+in a repository. Another way to filter repositories can be to select projects
+which are demonstrably used in at least one other project.
+There is some conscious choice to be made here, related to how we want
+the system to perform in a real-world setting. Having some noise in the
+training dataset will make our system more robust to noisy inputs at
+inference time, but will also make its predictions more random. Depending
+
+on the intended use and whole system integration, we may want to choose
+to use more or less noisy data and add pre- and post-filtering operations.
+Often, rather than removing noise, an interesting solution is to model the
+noise and to find a way to be able to do conditional generation based on the
+amount of noise we want to have in our model generation. For instance here
+we could:
+Retrieve (noisy) information on the quality of the code, for
+instance with stars or downstream usage
+Add this information as input to our model during the training, for
+instance in the first token of each input sequence
+At generation/inference time, choose the token corresponding to
+the quality we want (typically the maximal quality).
+This way, our model will both (1) be able to accept and handle noisy inputs
+without them being out of distribution and (2) generate good quality output.
+GitHub repositories can be accessed in two main ways:
+Via the GitHub REST API like we saw in Chapter 7 where we
+downloaded all the GitHub issues of the Transformers library .
+Via public dataset inventories like the one of Google BigQuery.
+Since the REST API is rate-limited and we need a lot data for our
+pretraining corpus, we’ll use Google BigQuery to extract all the Python
+repositories. The bigquery-public-data.github_repos.contents table contains
+copies of all ASCII files that are less than 10 MB. In addition, projects also
+need to be open-source to be included, as determined by GitHub’s License
+API.
+The Google BigQuery dataset doesn’t contain stars or downstream usage
+information, and to filter by stars or usage in downstream libraries, we
+could use the GitHub REST API or a service like Libraries.io which
+monitors open-source packages. Indeed, a dataset called CodeSearchNet
+was released recently by a team from GitHub which filtered repositories
+
+used in at least one downstream task using information from Libraries.io.
+This dataset is also preprocessed in various ways (extracting top-level
+methods, splitting comments from code, tokenizing code)
+For the educational purposes of the present chapter and to keep the data
+preparation code rather concise, we will not filter according to stars or
+usage and will just grab all the Python files in the GitHub BigQuery dataset.
+Let’s have a look at what it takes to create such a code dataset with Google
+BigQuery.
+Creating a Dataset with Google BigQuery
+We’ll begin by extracting all the Python files on GitHub public repositories
+from the snapshot on Google BigQuery. The steps to export these files are
+adapted from the TransCoder implementation and are as follows:
+Create a Google Cloud account (a free trial should be sufficient).
+Create a Google BigQuery project under your account
+In this project, create a dataset
+In this dataset, create a table where the results of the SQL request
+below will be stored.
+Prepare and run the following SQL query on the github_repos
+table
+Before running the SQL request, make sure to change the
+query settings to save the query results in the table
+(MORE  Query Settings  Destination Set a
+destination table for query results put table name)
+Run the SQL request!
+
+This command processes about 2.6 TB of data to extract 26.8 million files.
+The result is a dataset of about 47 GB of compressed JSON files, each of
+which contain the source code of Python files. We filtered to remove empty
+and small files such as _init_.py which don’t contain much useful
+information. We also remove files larger than 1 MB which are not included
+in the BigQuery dump any way. We also downloaded the licenses for all the
+file so we can filter the training data based on licenses if we want.
+Let’s download the results to our local machine. If you try this at home
+make sure you have good bandwidth available and at least 50 GB of free
+disk space. The easiest way to get the resulting table to your local machine
+follows this two step process:
+Export your results to Google Cloud:
+Create a bucket and a folder in Google Cloud Storage
+(GCS)
+Export your table to this bucket by selecting EXPORT
+Export to GCS  export format JSON , compression GZIP
+To download the bucket to your machine use the gsutil library:
+
+
+For the sake of reproducibility and if the policy around free usage of
+BigQuery changes in the future, we will also share this dataset on the
+Hugging Face Hub. Indeed, in the next section we will actually upload this
+repository on the Hub together!
+For now, if you didn’t use the above steps on BigQuery, you can directly
+download the dataset from the Hub as follows:
+
+We can now retrieve the dataset simply with:
+
+
+Working with a 50 GB dataset can be a challenging task. On the one hand it
+requires enough disk space and on the other hand one must be careful not to
+run out of RAM. In the following section we have a look how the datasets
+library helps dealing with large datasets on small machines.
+
+Working with Large Datasets
+Loading a very large dataset is often a challenging task, in particular when
+the data is larger than your machine’s RAM. For a large-scale pretraining
+
+dataset, this is very much a common situation. In our example, we have 47
+GB of compressed data and about 200 GB uncompressed data which is
+quite likely not possible to extract and load into the RAM memory of a
+standard sized laptop or desktop computer.
+Thankfully, the Datasets library has been designed from the ground up to
+overcome this problem with two specific features which allow you to set
+yoursefl free from:
+1. RAM limitations with memory-mapping
+2. Hard-drive space limitations with streaming
+
+Memory-mapping
+To overcome RAM limitations, Datasets uses a mechanism for zero-copy
+and zero-overhead memory-mapping which is activated by default.
+Basically, each dataset is cached on the drive in a file which is a direct
+reflection of the content in RAM memory. Instead of loading the dataset in
+RAM, Datasets opens a read-only pointer to this file and uses it as a
+substitute for RAM, basically using the hard-drive as a direct extension of
+the RAM memory. You may wonder if this might not make our training I/O
+bound. In practice, NLP data is usually very lightweight to load in
+comparison to the model processing computations so this is rarely an issue.
+In addition, the zero-copy/zero-overhead format used under the hood is
+Apache Arrow which makes it very efficient to access any element.
+Let’s have a look how we can make use of this with our datasets:
+
+Up to now we have mostly used the Datasets library to access remote
+datasets on the Hugging Face Hub. Here we will directly load our 48 GB of
+compressed JSON files that we have stored locally. Since the JSON files are
+compressed we first need to decompress them which Datasets takes care of
+for us. Be careful because this requires about 380 GB of free disk space. At
+the same time this will use almost no RAM at all. By setting
+delete_extracted=True in the dataset’s downloading configuration,
+we can make sure that we delete all the files we don’t need anymore as soon
+as possible:
+
+Under the hood, the Datasets extracted and read all the compressed JSON
+files by loading them in a single optimized cache file. Let’s see how big this
+dataset is once loaded:
+As we can see this dataset is much larger than our typical RAM memory,
+but we can still load and access it. We are actually still using a very limited
+amount of memory with our Python interpreter. The file on drive is used as
+an extension of RAM. Iterating on it is slightly slower than iterating on inmemory data, but typically more than sufficient for any type of NLP
+processing. Let’s run a little experiment on a subset of the dataset to
+illustrate this:
+
+Depending on the speed of your hard-drive and the batch size, the speed of
+iterating over the dataset can typically range from a few tenth of GB/s to
+several GB/s. This is great but what if you can’t free enough disk space to
+store the full dataset locally? Everybody knows the feeling of helplessness
+when getting a full disk warning and then painfully reclaiming GB after GB
+looking for hidden files to delete. Luckily you don’t need to store the full
+dataset locally if you use the streaming feature of the Datasets library!
+
+Streaming
+
+When scaling up, some datasets will be difficult to even fit on a standard
+hard-drive. In this case, an alternative to scaling up
+the server you are using is to stream the dataset. This is also possible with
+the Datasets library for a number of compressed or uncompressed file
+formats which can be read line by line, like JSON Lines, CSV or text, either
+raw, zip, gzip or zstandard compressed. Let’s load our dataset directly from
+the compressed JSON files instead of creating a cache file from them:
+
+
+As you can notice loading the dataset was instantaneous! In streaming
+mode, the dataset the compressed JSON files will be opened and read on
+the fly. Our dataset is now an IterableDataset object. This means that
+we cannot access random elements of it like
+streamed dataset[1264] but we need to read it in order, for
+instance with next(iter(streamed_dataset)). It’s still possible to
+use methods like shuffle() but these will operate by fetching a buffer of
+examples and shuffling within this buffer (the size of the buffer is
+adjustable). When several files are provided as raw files (like here our 188
+files) shuffle() will also randomize the order of files for the iteration.
+Let’s create and iterator for our streamed dataset and peek at the first few
+examples:
+
+
+Note that when we loaded our dataset we provided the names of all the
+JSON files. But when our folder only contains a set of JSON, CSV or text
+files, we can also just provide the path to the folder and Datasets will take
+care of listing the files, using the convenient files format loader and
+iterating through the files for us.
+A simpler way to load the dataset is thus:
+
+The main interest of using a streaming dataset is that loading this dataset
+will not create a cache file on the drive when loaded or require any
+(significant) RAM memory. The original raw files are extracted and read on
+the fly when a new batch of examples is requested, and only the sample or
+batch is loaded in memory.
+
+Streaming is especially powerful when the dataset is not stored locally but
+accessed directly on a remote server without downloading the raw data files
+locally. In such a setup, we can then use arbitrary large datasets on an
+(almost) arbitrarily small server. Let’s push our dataset on the Hugging Face
+Hub and accessing it with streaming.
+
+Adding Datasets to the Hugging Face Hub
+Pushing our dataset to the Hugging Face Hub will in particular allow us to:
+Easily access it from our training server
+See how streaming dataset also work seamlessly with datasets from
+the Hub
+Share it with the community including you, dear reader!
+To upload the dataset, we first need to login to our Hugging Face account
+by running
+huggingface-cli login
+
+in the terminal and providing the relevant credentials. Once this is done, we
+can directly create a new dataset on the Hub and upload the compressed
+JSON files. To make it easy, we will create two repositories: one for the
+train split and one with the validation split. We can do this by running the
+repo create command of the CLI as follows:
+
+
+Here we’ve specified that the repository should be a dataset (in contrast to
+the model repositories used to store weights), along with the organization
+
+we’d like to store the repositories under. If you’re running this code under
+your personal account, you can omit the organisation flag. Next we
+need to clone these empty repositories to our local machine, copy the JSON
+files to them, and push the changes to the Hub. We will take the last
+compressed JSON file out of the 184 we have as the validation file, i.e. a
+roughly 0.5 percent of our dataset:
+
+The git add . step can take a couple of minutes since a hash of all the
+files is computed. Uploading all the files will also take a little bit of time.
+Since we will be able to use streaming later in the chapter, this step is
+however not lost time and will allow us to go significantly faster in the rest
+of our experiments.
+And that’s it! Our two splits of the dataset as well as the full dataset are now
+live on the Hugging Face Hub at the following URLs:
+
+We should add README cards that explain how both datasets were created
+and as much useful information as possible. A well documented dataset is
+more likely to be useful for other people as well as your future self.
+Modifying the README can also be done directly on the Hub.
+Now that our dataset is online, we can download it or stream examples from
+it from anywhere with:
+
+We can see that we get the same examples as with the local dataset which is
+great. That means we can now stream the dataset to any machine with
+Internet access without worrying about disk space. Now that we have a
+large dataset it is time to think about the model. In the next section we
+explore several options for the pretraining objective.
+
+A Tale of Pretraining Objectives
+
+Now that we have access to a large-scale pretraining corpus we can start
+thinking about how to pretrain a language model. With such a large
+codebase consisting of code snippets like the one shown in Figure 10-1, we
+can tackle several tasks which influences the choice of pretraining
+objectives. Let’s have a look at three common choices.
+
+Figure 10. An example of a Python function that could be found in our dataset.
+
+Causal Language Modeling
+A natural task with textual data is to provide a model with the beginning
+of a code sample and ask it to generate possible completions. This is a
+self-supervised training objective in which we can use the dataset
+without annotations and is often referred to as Causal Language
+Modeling or Auto-regressive Modeling. The probability of a given
+sequence of tokens is modeled as the successive probabilities of each
+tokens given past tokens, and we train a model to learn this distribution
+and predict the most likely token to complete a code snippet. A
+downstream task directly related to such a self-supervised training task
+is AI-powered code auto-completion. A decoder-only architecture such
+as the GPT family of models is usually best suited for this task as shown
+in Figure 10-2.
+
+Figure 10-2. The future tokens are masked in Causal Language Modeling and the model needs to
+predict them. Typically a decoder model such as GPT is used for such task.
+
+Masked Language Modeling
+A related but slightly different task is to provide a model with a noisy
+code sample (for instance with a code instruction replaced by a random
+word) and ask it to reconstruct the original clean sample as illustrated in
+
+Figure 10-3. This is also a self-supervised training objective and
+commonly called Masked Language Modeling or Denoising Objective.
+It’s harder to think about a downstream task directly related to
+denoising, but denoising is generally a good pretraining task to learn
+general representations for later downstream tasks. Many of the models
+that we have used in the previous chapters (like BERT) were pretrained
+with such a denoising objective. Training a masked language model on
+a large corpus can thus be combined with a second step of fine-tuning
+the model on a downstream task with a limited number of labeled
+examples. We took this approach in the previous chapters and for code
+we could use the text classification task for code-language
+detection/classification. This is the mechanism underlying the
+pretraining procedure of encoder models such as BERT.
+
+Figure 10-3. In Masked Language Modeling are some of the input tokens either masked or replaced
+and the model’s task is to predict the original tokens. This is the architecture underlying the BERT
+branch of transformer models.
+
+Sequence-to-Sequence Training
+An alternative task is to use a heuristic like regular expressions to
+separate comments or docstrings from code and build a large scale
+dataset of (code, comments) pairs that can be used as an annotated
+dataset. The training task is then a supervised training objective in
+which one category (code or comment) is used as input for the model
+and the other category (respectively comment or code) is used as labels.
+This is a case of supervised learning with (input, labels) pairs as
+highlighted in Figure 10-4. With a large, clean and diverse dataset as
+well as a model with sufficient capacity we can try to train a model that
+learn to transcript comments in code or vice-versa. A downstream task
+directly related to this supervised training task is then “Documentation
+from code generation” or “Code from documentation generation”
+
+depending on how we set our input/outputs. Both tasks are not of equal
+difficulty, and in particular generating code from documentation might
+seem a priori like a harder task to tackle. In general, the closest the task
+will be to “pattern recognition/matching”, the most likely the
+performances will be decent with the type of deep learning techniques
+we’ve explored in this book. In this setting a sequence is translated into
+another sequence which is where encoder-decoder architectures usually
+shine.
+
+Figure 10-4. Using heuristics the inputs can be split into comment/code pairs. The model gets one
+element as input and needs to generate the other one. A natural architecture for such a sequence-tosequence task is an encoder-decoder setup.
+
+You may recognize that these approaches reflect how some of the major
+models that we have seen and used in the previous chapters are trained:
+Generative pretrained models like the GPT family are trained using
+a Causal Language Modeling objective
+Denoising models like the BERT family are trained using a
+Masked Language Modeling objective
+Encoder-decoder models like the T5, BART or PEGASUS models
+are trained using heuristics to create pairs of (inputs, labels). These
+heuristics can be for instance a corpus of pairs of sentences in two
+languages for a machine translation model, a heuristic way to
+identify summaries in a large corpus for a summarization model or
+various ways to corrupt inputs with associated uncorrupted inputs
+as labels which is a more flexible way to perform denoising than
+the previous masked language modeling.
+
+Since we want to build a code auto-completion model we select the first
+type objective and choose a GPT architecture for the task. Code autocompletion is the task of providing suggestions to complete lines or
+functions of codes during programming in order to make the experience of
+a programmer significantly easier. Code auto-completion can be particularly
+useful when programming in a new language or framework, or when
+learning to code. It’s also useful to automatically produce repetitive code.
+Typical examples of such commercial products using AI models in mid2021 are GitHub Copilot, TabNine or Kite among others. The first step
+when training a model from scratch is to create a new tokenizer tailored for
+the task. In the next section we have a look at what it takes to build a
+tokenizer from scratch.
+
+Building a Tokenizer
+Now that we have gathered and loaded our large dataset, let’s see how we
+can process it to feed and train our model. As we’ve seen since Chapter 2,
+the first step will be to tokenize the dataset to prepare it in a format that our
+model can ingest, namely numbers rather than strings.
+In the previous chapters we’ve used tokenizers that were already provided
+with their accompanying models. This made sense since our models were
+pretrained using data passed through a specific preprocessing pipeline that’s
+defined in the tokenizer. When using a pretrained model, it’s important to
+stick with the same preprocessing design choices selected for pretraining.
+Otherwise the model can be fed out-of-distribution patterns or unknown
+tokens.
+However, when we train the model from scratch on a new dataset, using a
+tokenizer prepared for another dataset can be sub-optimal. Let’s illustrate
+what we mean by sub-optimal with a few examples:
+The T5 tokenizer was trained on a very large corpus of text called
+the Colossal Clean Crawled Corpus (C4), but an extensive step of
+
+stop-word filtering was used to create it. As a result the T5
+tokenizer has never seen common English words such as “sex”.
+The CamemBERT tokenizer was also trained on a very large
+corpus of text, but only comprising French text (the French subset
+of the OSCAR corpus). As such it is unaware of common English
+words such “being”.
+We can easily test these features of each tokenizer in practice:
+
+In many cases, splitting such very short and common words in subparts will
+is inefficient since this will increase the input sequence length of the model.
+Therefore it’s important to be aware of the domain and filtering of the
+dataset which was used to train the tokenizer. The tokenizer and model can
+encode bias from the dataset which has an impact on their downstream
+behavior. To create an optimal tokenizer for our dataset, we thus need to
+train one ourselves. Let’s see how this can be done.
+
+NOTE
+Training a model involves starting from a given set of weights and using (in today’s
+machine learning landscape) back-propagation from an error signal on a designed
+objective to minimize the loss of the model and (hopefully) find an optimal set of
+weights for the model to perform the task defined by the training objective. Training a
+tokenizer on the other hand does not involve back-propagation or weights. It is a way to
+create an optimal mapping to go from a string of text to a list of integers that can be
+ingested by the model on a given corpus. In today’s tokenizers, the optimal string to
+integer conversion involves a vocabulary consisting of a list of atomic strings and an
+associated method to convert, normalize, cut, or map a text string into a list of indices
+with this vocabulary. This list of indices is then the input for our neural network.
+
+The Tokenizer Pipeline
+So far we have treated the tokenizer as a single operation that transforms
+strings to integers we can pass through the model. This is not entirely true
+and if we take a closer look at the tokenizer we can see that it is a full
+processing pipeline that usually consists of four steps as shown in
+Figure 10-5.
+
+Figure 10-5. A tokenization pipeline usually consists of four processing steps.
+
+Let’s take a closer look at each processing step and illustrate their effect
+with the unbiased example sentence "Transformers are awesome!:
+Normalization
+This step corresponds to the set of operations you apply to a raw string
+to make it less random or “cleaner”. Common operations include
+stripping whitespace, removing accented characters or lower-casing all
+the text. If you’re familiar with Unicode normalization, it is also a very
+common normalization operation applied in most tokenizers. There
+often exist various ways to write the same abstract character. It can
+make two version of the “same” string (i.e. with the same sequence of
+abstract character) appear different. Unicode normalization schemes like
+NFC, NFD, NFKC, NFKD replace the various ways to write the same
+
+character with standard forms. Another example of normalization is
+“lower-casing” which is sometime used to reduce the size of the
+vocabulary necessary for the model of if the model is expected to only
+accept and use lower cased characters. After that normalization step, our
+example string could look like transformers are awesome!".
+Pretokenization
+This step splits a text into smaller objects that give an upper bound to
+what your tokens will be at the end of training. A good way to think of
+this is that the pretokenizer will split your text into “words” and then,
+your final tokens will be parts of those words. For the languages which
+allow this (English, German and many western languages), strings can
+be split into words, typically along white spaces and punctuation. For
+example, this step might transform our example into something like. These words
+are then simpler to split into subwords with Byte-Pair Encoding (BPE)
+or Unigram algorithms in the next step of the pipeline. However,
+splitting into “words” is not always a trivial and deterministic operation
+or even an operation which make sense. For instance in languages like
+Chinese, Japanese or Korean, grouping symbols in semantic unit like
+Western words can be a non-deterministic operation with several
+equally valid groups. In this case, it might be best to not pretokenize the
+text and instead use a language-specific library for pretokenization.
+Tokenizer model
+Once the input texts are normalized and pretokenized, the tokenizer
+applies a subword splitting model on the words. This is the part of the
+pipeline that needs to be trained on your corpus (or that has been trained
+if you are using a pretrained tokenizer). The role of the model is to split
+the “words” into subwords to reduce the size of the vocabulary and try
+to reduce the number of out-of-vocabulary tokens. Several subword
+tokenization algorithms exist including BPE, Unigram and WordPiece.
+For instance, our running example might look like trans,
+formers, are, awesome,  after the tokenizer model is
+
+applied. Note that at this point we no longer have a list of strings but a
+list of integers with the input IDs. To keep the example illustrative we
+keep the words but drop the string apostrophes to indicate the
+transformation.
+Post-processing
+This is the last step of the tokenization pipeline, in which some
+additional transformations can be applied on the list of tokens, for
+instance adding potential special tokens at the beginning or end of the
+input sequence of token indices. For example, a BERT-style tokenizer
+would transform add a classification and seperator token. This sequence
+of integers can then be fed to the model.
+The tokenizer model is obviously the heart of the whole pipeline so let’s dig
+a bit deeper to fully understand what is going on under the hood.
+
+The Tokenizer Model
+The part of the pipeline which can be trained is the “tokenizer model”. Here
+we must also be careful about not getting confused. The “model” of the
+tokenizer is not a neural network model. It’s a set of tokens and rules to go
+from the string to a list of indices.
+As we’ve discussed in Chapter 2, there are several subword tokenization
+algorithms such as BPE, WordPiece, and Unigram.
+BPE starts from a list of basic units (single characters) and creates a
+vocabulary by a process of progressively creating new tokens that consist of
+the merge of the most frequently co-occurring basic units and adding them
+to the vocabulary. This process of progressively merging the vocabulary
+pieces most frequently seen together is re-iterated until a predefined
+vocabulary size is reached.
+Unigram starts from the other end by initializing its base vocabulary with a
+large number of tokens (all the words in the corpus and potential subwords
+
+build from them) and progressively removing or splitting the less useful
+tokens (mathematically the symbol which contributes least to the loglikelihood of the training corpus) to obtain a smaller and smaller vocabulary
+until the target vocabulary size is reached.
+The difference between these various algorithms and their impact on
+downstream performance varies depending on the task and overall it’s quite
+difficult to identify if one algorithm is clearly superior to the others. Both
+BPE and Unigram have reasonable performance in most cases. WordPiece
+is a predecessor of Unigram, and it’s official implementation was never
+open-sourced by Google.
+Measuring Tokenizer Performance
+The optimality and performance of a tokenizer are also quite difficult to
+measure in practice. Some ways to measure the optimality include:
+Subword Fertility which calculated the average number of
+subwords produced per tokenized word.
+Proportion of Continued Words which refers to the proportion of
+words in a corpus where the tokenized word is continued across at
+least two sub-tokens.
+Coverage metrics like the proportion of unknown words or rarely
+used tokens in a tokenized corpus.
+In addition to this, robustness to misspelling or noise is often estimated as
+well as model performances on such out-of-domain examples as they
+strongly depend on the tokenization process.
+These measures gives a set of different views on the tokenizer performance
+but tend to ignore the interaction of the tokenizer with the model
+(e.g. subword fertility is minimized by including all the possible words in
+the vocabulary but this will produce an very large vocabulary for the
+model).
+
+In the end, the performance of the various tokenization approaches are thus
+generally best estimated by using the downstream performance of the
+model as the ultimate metric. For instance the good performance of early
+BPE approaches were demonstrated by showing improved performance on
+machine-translation of the trained models using these tokenization and
+vocabularies instead of character or word based tokenization.
+WARNING
+The terms “tokenizer” and “tokenization” are overloaded terms and can mean different
+things in different fields. For instance in linguistics, tokenization is sometimes
+considered the process of demarcating and possibly classifying sections of a string of
+input characters according to linguistically meaningful classes like nouns, verbs,
+adjectives, or punctuation. In this book, the tokenizer and tokenization process is not
+particularly aligned with linguistic units but is computed in a statistical way from the
+character statistics of the corpus to group most likely or most often co-ocurring symbols.
+
+Let’s see how we can build our own tokenizer optimized for Python code.
+
+A Tokenization Pipeline for Python
+Now that we have seen the workings of a tokenizer in details let’s start
+building one for our use-case: tokenizing Python code. Here the question of
+pretokenization merits some discussion for programming languages. If we
+split on white spaces and remove them we will lose all the indentation
+information in Python which is important for the semantics of the program.
+Just think about while loops and if-then-else statements. On the other hand,
+line-breaks are not meaningful and can be added or removed without impact
+on the semantic. Similarly, punctuation like an underscore is used to
+create a single variable name from several sub-parts and splitting on
+underscore might not make as much sense as it would in natural language.
+Using a natural language pretokenizer for tokenizing code thus seems
+potentially suboptimal.
+One way to solve this issue could be to use a pretokenizer specifically
+designed for Python, like the built-in tokenize module:
+
+
+We see that the tokenizer split our code string in meaningful units (code
+operation, comments, indent and dedent, etc). One issue with using this
+approach is that this pretokenizer is Python-based and as such typically
+rather slow and limited by the Python GIL. On the other hand, most of the
+tokenizers in Transformers are provided by the Tokenizers library which are
+coded in Rust. The Rust tokenizers are many orders of magnitude faster to
+
+train and to use and we would thus likely want to use them given the size of
+our corpus.
+Let’s see what tokenizer could be interesting to use for us in the collection
+provided on the hub. We want a tokenizer which preserves the spaces. A
+good candidate could be a byte-level tokenizer like the tokenizer of GPT-2.
+Let’s load this tokenizer and explore its tokenization properties:
+
+This is quite a strange output, let’s try to understand what is happening here
+by running the various sub-modules of the pipeline that we’ve just seen.
+Let’s see what normalization is applied in this tokenizer:
+print(tokenizer.backend_tokenizer.normalizer)
+None
+
+This tokenizer uses no normalization. This tokenizer is working directly on
+the raw Unicode inputs without cleaning/normalization steps. Let’s take a
+look at the pretokenization:
+
+This output is a little strange. What are all these symbols and what are the
+numbers accompanying the tokens? Let’s explain both and understand
+better how this tokenizer work.
+Let’s start with the numbers. The Tokenizers library has a very useful
+feature that we have discussed a little in previous chapters: offset tracking.
+All the operation on the input string are tracked so that it’s possible to know
+exactly what part of the input string an output token correspond to. These
+numbers simply indicate where in the original string each token comes
+from. For instance the word 'hello' corresponds to the characters 8 to 13
+in the original string. If some characters were removed in a normalization
+step we would still be able to associate each token with the respective part
+in the original string.
+The other curious feature of the tokenized text are the odd looking
+characters such as. Byte-level means that our tokenizer works on
+bytes instead of Unicode characters. Each Unicode character is composed
+of between 1 to 4 bytes depending on the Unicode character. The nice thing
+about bytes is that, while there exists 143,859 Unicode characters in all the
+Unicode alphabet, there are only 256 elements in the bytes’ alphabets and
+you can express each Unicode character as a sequence of 1 to 4 of these
+bytes. If we work on bytes we can thus express all the strings in the UTF-8
+world as longer strings in this alphabet of 256 values. Basically we could
+thus have a model using an alphabet of only 256 words and be able to
+process any Unicode string. Let’s have a look at what the byte
+representations of some characters look like:
+
+At this point you might wonder: why is it interesting to work on byte-level?
+Let’s investigate the various options we have to define a vocabulary for our
+model and tokenizers.
+We could decide to build our vocabulary from the 143,859 Unicode
+characters and add to this base vocabulary frequent combinations of these
+characters, also known as words and subwords. But having a vocabulary of
+over 140,000 words will be too much for a deep learning model. We will
+need to model each Unicode characters with one embedding vector and
+some of these characters are very rarely seen and will be really hard to
+learn. Note also that this number of 140,000 will be a lower bound on the
+size of our vocabulary since we would like to have also words,
+i.e. combination of Unicode characters in our vocabulary!
+On the other extreme, if we only use the 256 byte values as our vocabulary,
+the input sequences will be segmented in many small pieces (each byte
+constituting the Unicode characters) and as such our model will have to
+work on long inputs and spend a significant compute power on
+reconstructing Unicode characters from their separate bytes and then words
+from these characters. See the paper accompanying the byteT5 model
+release for a detailed study of this overhead5.
+A middle ground solution is to construct a medium size vocabulary by
+extending the 256 words vocabulary with the most common combination of
+bytes. This is the approach taken by the BPE algorithm. The idea is to
+progressively construct a vocabulary of a pre-defined size by creating new
+vocabulary tokens through iteratively merging the most frequently cooccurring pair of tokens in the vocabulary. For instance, if t and h occur
+very frequently together like in English, we’ll add a token th in the
+
+vocabulary to model this pair of tokens instead of keeping them separated.
+Starting from a basic vocabulary of elementary units (typically the
+characters or the 256 byte values in our case) we can thus model any string
+efficiently.
+WARNING
+Be careful not to confuse the “byte” in “Byte-Pair Encoding” with the “byte” in “ByteLevel”. The name “Byte-Pair Encoding” comes from a data compression technique
+proposed by Philip Gage in 1994 and originally operating on bytes6. Unlike its name
+might indicate, standard BPE algorithms in NLP typically operate on Unicode strings
+rather than bytes though, the byte-level byte-pair encoding is a new type of byte-pair
+encoding specifically working on bytes. If we read our Unicode string in bytes we can
+thus reuse a simple byte-pair encoding subword splitting algorithm.
+
+There is just one issue to be able to use a typical BPE algorithm in NLP. As
+we just mentioned these algorithm are usually designed to work with clean
+“Unicode string” as inputs and not bytes and usually expect regular ASCII
+characters in the inputs and for instance no spaces or control characters. But
+in the Unicode character corresponding to the 256 first bytes there are many
+control characters (newlines, tabs, escape, line feed and other non-printable
+characters). To overcome this problem, the GPT-2 tokenizer first maps all
+the 256 inputs bytes to Unicode strings which can easily be digested by the
+standard BPE algorithms, i.e. we will map our 256 elementary values to
+Unicode strings which all correspond to standard printable Unicode
+characters.
+It’s not very important that these Unicode characters are encoded with 1
+byte or more, what is important is to have 256 single values at the end,
+forming our base vocabulary, and that these 256 values are correctly
+handled by our BPE algorithm. Let’s see some examples of this mapping on
+the GPT-2 tokenizer. We can access the 256 values mapping as follow:
+
+And we can take a look at some common values of bytes and associated
+mapped Unicode characters:
+All simple byte values corresponding to regular caracters like
+
+We could have used more explicit conversion like mapping newlines to a
+NEWLINE string but BPE algorithm are typically designed to word on
+character so keep the equivalence of 1 Unicode character for each byte
+character is easier to handle with an out-of-the-box BPE algorithm. Now
+that we have been introduced to the dark magic of Unicode encodings, we
+can understand our tokenization conversion a bit better:
+
+We can recognize here the newlines (that are mapped to  as we now know)
+and the spaces (mapped to). We also see that:
+Spaces, and in particular consecutive spaces, are conserved (for
+instance the three spaces in),
+Consecutive spaces are considered as a single word,
+Each space preceding a word is attached and considered as being
+part of the subsequent word
+Now that we’ve understood the preprocessing steps of our tokenizer, let’s
+experiment with the byte-pair encoding model. As we’ve mentioned, the
+BPE model is in charge of splitting the words in sub-units until all sub-units
+belongs to the predefined vocabulary.
+The vocabulary of our GPT-2 tokenizer comprise 50257 words:
+the base vocabulary with the 256 values of the bytes
+50,000 additional tokens created by repeatedly merging the most
+commonly co-occurring tokens
+a special character added to the vocabulary to represent document
+boundaries
+We can easily check that by looking at the length attribute of the tokenizer:
+
+
+Running the full pipeline on our input code give us the following output:
+
+
+As we can see the BPE tokenizer keeps most of the words but will split the
+multiple spaces of our indentation into several consecutive spaces. This
+happens because this tokenizer is not specifically trained on code and
+mostly on text where consecutive spaces are rare. The BPE model thus
+doesn’t include a specific token in the vocabulary for indentation. This is a
+case of non-adaptation of the model to the corpus as we’ve discussed earlier
+and the solution, when the dataset is large enough, is to retrain the tokenizer
+on the target corpus. So let’s get to it!
+
+Training a Tokenizer
+Let’s retrain our byte-level BPE tokenizer on a slice of our corpus to get a
+vocabulary better adapted to Python code. Retraining a tokenizer provided
+in the Transformers library is very simple. We just need to:
+Specify our target vocabulary size,
+Prepare an iterator to supply list of inputs string to process to train
+the tokenizer’s model
+Call the train_new_from_iterator method.
+Unlike deep-learning models which are often expected to memorize a lot of
+specific details from the training corpus (often seen as common-sense or
+world-knowledge), tokenizers are really just trained to extract the main
+statistics of a corpus and not focus on details. In a nutshell, the tokenizer is
+just trained to know which letter combinations are the most frequent in our
+corpus.
+
+You thus don’t always need to train your tokenizer on a very large corpus
+but mostly on a corpus well representative of your domain and from which
+the model can extract statistically significant measures. Depending on the
+vocabulary size and the corpus, the tokenizer can end up memorizing words
+that would not expected. For instance let’s have a look at the last words and
+the longest words in our GPT-2 tokenizer:
+
+The first token <|endoftext|> is the special token used to specify the
+end of a text sequence and was added after building the BPE vocabulary.
+For each of these words our model will have to learn an associated word
+embedding and we probably don’t want the model to focus too much
+representational power on some of these noisy words. Also note how some
+very time- and space-specific knowledge of the world (e.g. proper nouns
+like Hitman or Commission) are embedded at a very low level in our
+modeling approach by being granted separate tokens with associated
+vectors in the vocabulary. This type of very specific tokens in a BPE
+tokenizer can also be an indication that the target vocabulary size is too
+large or the corpus contain idiosyncratic tokens.
+
+Let’s train a fresh tokenizer on our corpus and examine its learned
+vocabulary. Since we just need a corpus reasonably representative of our
+dataset statistics, let’s select about 1-2 GB of data, i.e. about 100,000
+documents from our corpus:
+
+Let’s investigate the first and last words created by our BPE algorithm to
+see how relevant is our vocabulary.
+
+In the first words created we can see various standard levels of indentations
+summarized in the whitespace tokens as well as short common Python key
+words like self, or, in. This is a good sign that our BPE algorithm is
+working as intended.
+In the last words we still see some relatively common words like or
+`inspect`8 as well as a set of more noisy words comin from the comments.
+We can also tokenize our simple example of Python code to see how our
+tokenizer is behaving on a simple example:
+
+Even though they are not code keywords, it’s a little annoying to see
+common English words like World or say being split by our tokenizer
+since we expect them to occur rather frequently in the corpus. Let’s check if
+all the Python reserved keywords are in the vocabulary:
+
+We see that several quite frequent keywords like finally are not in the
+vocabulary as well. Let’s try to build a larger vocabulary on a larger sample
+of our dataset. For instance a vocabulary of 32,768 words (multiple of 8 are
+better for some efficient GPU/TPU computations later with the model) and
+train it on a two times larger slices of our corpus with 200,000 documents:
+
+We don’t expect the most frequent the most frequent tokens to change much
+when adding more documents so let’s look at last tokens:
+
+A brief inspection doesn’t show any regular programming keyword in the
+last created words. Let’s try to tokenize on our sample code example with
+the new larger tokenizer:
+
+Here also the indents are conveniently kept inside the vocabulary and we
+see that common English words like Hello, World and say are also
+included as single tokens, which seems more in line with our expectations
+of the data the model may see in the downstream task. Let’s investigate the
+common Python keywords as we did before:
+
+
+We are still missing the nonlocal keyword but this keyword is also very
+rarely used in practice as it make the syntax quite more complex. Keeping it
+outside of the vocabulary seems reasonable. We have seen that very
+common Python keywords like def, in or for are very early in the
+vocabulary, indicating that they are very frequent as expected. Obviously,
+the simplest solution if we wanted to use a smaller vocabulary would be to
+remove the code comments which account for a significant part of our
+vocabulary. However, in our case we’ll decide to keep them, assuming they
+may help our model addressing the semantic of the task.
+After this manual inspection, our larger tokenizer seems well adapted for
+our task (remind that objectively evaluating the performance of a tokenizer
+is a challenging task in practice as we detailed before). We will thus
+proceed with it.
+After this manual inspection, our larger tokenizer seems well adapted for
+our task. Remind that objectively evaluating the performance of a tokenizer
+is a challenging task in practice as we detailed before. We will thus proceed
+with this one and train a model to see how well it works in practice.
+NOTE
+You can easily verify yourself that the new tokenizer is about 2x more efficient than the
+standard tokenizer. This means that the tokenizer uses half the tokens to encode a text
+than the existing one which gives us twice the effective model context for free. When
+we thus train a new model with the new tokenizer on a context window of 1024 it is
+equivalent of training the same model with the old tokenizer on a context window of
+2048 with the advantage of being much faster and more memory efficient because of the
+attention scaling.
+
+Saving a Custom Tokenizer on the Hub
+Now that our tokenizer is trained we need to save it. The simplest way to
+save it and be able to access it from anywhere later is to push it to the
+
+Hugging Face Hub. This will be especially useful when we later use a
+separate training server. Since this will be the first file we need to create a
+new model repository.
+To create a private model repository and save our tokenizer in it as a first
+file we can directly use the method push_to_hub of the tokenizer. Since
+we already authenticated our account with huggingface-cli login
+we can simply push the tokenizer as follows:
+
+
+If you have your API token not stored in the cache, you can also pass it
+directly to the function with use_auth_token=your_token. This will
+create a repository in your namespace name codeparrot, so anyone can
+now load it by running:
+reloaded_tokenizer = AutoTokenizer.from_pretrained(model_ckpt)
+
+This tokenizer loaded from the Hub behaves exactly like our previously
+trained tokenizer:
+
+We can investigate its files and saved vocabulary on the Hub here at
+
+
+This was a very deep dive into the inner workings of the tokenizer and how
+to train a tokenizer for a specific use-case. Now that we can tokenize the
+inputs we can start building the model:
+
+Training a Model from Scratch
+Now is the part you have probably been waiting for: the model! To build a
+auto-complete function we need a rather efficient auto-regressive model so
+we choose a GPT-2 style model. In this section we initialize a fresh model
+without pretrained weights, setup a data loading class and finally create a
+scalable training loop. In the grand finale we then train a GPT-2 large
+model! Let’s start by initializing the model we want to train.
+
+
+This is the 1.5B parameters model! Pretty big capacity but we also have a
+pretty large dataset with 180GB of data. In general, large language models
+are more efficient to train so as long as our dataset is reasonably large we
+can definitely use a large language model.
+Let’s push the newly initialized model on the Hub by adding it to our
+tokenizer folder. Our model is large so we will need to activate git+lfs in it.
+Let’s go to our burgeoning model repository that currently only the
+tokenizer files in it and activate git-lfs to track large files easily:
+
+Pushing the model to the Hub may take a minute given the size of the
+checkpoint Since this model is quite large, let’s create a smaller
+version for debugging and testing purposes. We will take the standard GPT2
+size as base:
+
+Now that we have a model we can train we need to make sure we can feed
+it the input data efficiently during training.
+
+Data Loader
+To be able to train with maximal efficiency, we will want to supply our
+model with full sequences as much as possible. Let’s say our context length
+i.e. the input to our model is 1024 tokens, we always want to provide 1024
+tokens sequences to our models. But some of our code examples might be
+shorter than 1024 tokens and some might be longer.
+The simplest solution is to have a buffer and fill it with examples until we
+reach 1024 tokens. We can build this by wrapping our streaming dataset in
+an iterable which takes care of tokenizing on-the-fly and makes sure to
+provide constant length tokenized sequences as inputs to the model. This is
+pretty easy to do with the tokenizers of the transformers library. To
+understand how we can do it, let’s request one element in our streaming
+dataset:
+
+We will now tokenize this example and explicitly ask the tokenizer to .
+truncate the output to a specified maximum block length, and . return both
+the overflowing tokens and the lengths of the tokenized elements
+We can specify this behavior when we call the tokenizer with a text to
+tokenize:
+
+We can see that the tokenizer returns a batch for our input where our initial
+raw string has been tokenized and split in sequences of max
+max_length=10 tokens. The dictionary item length provides us with
+the length of each sequences. The last element of the length sequence
+contains the remaining tokens and is smaller than the sequence_length
+if the number of tokens of the tokenized string is not a multiple of
+sequence_length. The overflow_to_sample_mapping can be
+used to identify which segment belongs to which input string if a batch of
+inputs is provided.
+
+To feed batches with full sequences of sequence_length to our model,
+we should thus either drop the last incomplete sequence or pad it but this
+will render our training slightly less efficient and force us to take care of
+padding and masking padded token labels. We are much more compute than
+data constrained and will thus go the easy and efficient way here. We can
+use a little trick to make sure we don’t loose too many trailing segments.
+We can concatenate several examples before passing them to the tokenizer,
+separated by the special  token and reach a minimum
+character length before sending the string to the tokenizer.
+Let’s first estimate the average character length per tokens in our dataset:
+
+We can for instance make sure we have roughly 100 full sequences in our
+tokenized examples by defining our input string character length as:
+
+
+per output token that we just estimated: 3.6
+If we input a string with input_characters characters we will thus get
+on average number_of_sequences output sequences and we can just
+easily calculate how much input data we are losing by dropping the last
+sequence. If number_of_sequences is equal to 100 it means that we
+are ok to lose at most one percent of our dataset which is definitely
+acceptable in our case with a very large dataset. At the same time this
+ensures that we don’t introduce a bias by cutting off the majority of file
+endings.
+Using this approach we can have a constraint on the maximal number of
+batches we will loose during the training. We now have all we need to
+create our IterableDataset, which is a helper class provided by
+torch, for preparing constant length inputs for the model. We just need to
+inherit from IterableDataset and setup the __iter__ function that
+yields the next element with the logic we just walked through:
+
+
+While the standard practice in the transformers library that we have seen up
+to now is to use both input_ids and attention_mask, in this
+training, we have taken care of only providing sequences of the same,
+maximal, length (sequence_length tokens). The attention_mask
+input is usually used to indicate which input token is used when inputs are
+padded to a maximal length but are thus superfluous here. To further
+simplify the training we don’t output them. Let’s test our iterable dataset:
+
+
+Nice, this is working as we intended and we get nice constant length inputs
+for the model. Note that we added a shuffle operation to the dataset. Since
+this is a iterable dataset we can’t just shuffle the whole dataset at the
+beginning. Instead we setup a buffer with size buffer_size and load
+shuffle the elements in this buffer before we get elements from the dataset.
+Now that we have a reliable input source for the model it is time to build
+the actual training loop.
+
+Training Loop with Accelerate
+We now have all the elements to write our training loop. One obvious
+limitations of training our own language model is the memory limits on the
+GPUs we will use. In this example we will use several A100 GPUs which
+have the benefits of a large memory on each card, but you will probably
+need to adapt the model size depending on the GPUs you use. However,
+even on a modern graphics card you can’t train a full scale GPT-2 model on
+a single card in reasonable time. In this tutorial we will implement dataparallelism which will help utilize several GPUs for training. We won’t
+touch on model-parallelism, which allows you to distribute the model over
+several GPUs. Fortunately, we can use a nifty library called Accelerate to
+make our code scalable. The Accelerate is a library designed to make
+distributed training and changing the underlying hardware for training easy.
+
+Accelerate provides an easy API to make training scripts run with mixed
+precision and on any kind of distributed setting (multi-GPUs, TPUs etc.)
+while still letting you write your own training loop. The same code can then
+runs seamlessly on your local machine for debugging or your training
+environment. Accelerate also provides a CLI tool that allows you to quickly
+configure and test your training environment then launch the scripts. The
+idea of accelerate is to provide a wrapper with the minimal amount of
+modifications allowing for your code to run on distributed, multi-GPUs,
+mixed-precision and novel accelerators like TPUs. You only need to make a
+handful of changes to your native PyTorch training loop:
+
+Next we setup logging for training. Since training a model from scratch the
+training run will take a while and run on expensive infrastructure so we
+want to make sure that all relevant information is stored and easily
+accessible. We don’t show the full logging setup here but you can find the
+setup_logging function in the full training script. It sets up three levels
+of logging: a standrad python Logger, Tensorboard, and Weights &
+Biases. Depending on your preferences and use-case you can add or remove
+logging frameworks here. It returns the Python logger, a Tensorboard writer
+as well as a name for the run generated by the Weights & Biases logger.
+In addition we setup a function to log the metrics with Tensorboard and
+Weights & Biases. Note the use of accelerator.is_main_process
+
+At the end we wrap the dataset in a DataLoader which also handles the
+batching. Accelerate will take care of distributing the dataloader on each
+worker and make sure that each one receives different samples. Another
+aspect we need to implement is optimization. We will setup the optimizer
+
+and learning rate schedule in the main loop but we define a helper function
+here to differentiate the parameters that should receive weight decay. In
+general biases and LayerNorm weights are not subject to weight decay.
+
+Finally, we want to evaluate the model on the validation set from time to
+time so let’s setup an evaluation function we can call which calculate the
+loss and perplexity on the evaluation set:
+
+
+Especially at the start of training when the loss is still high it can happen
+that we get an overflow calculating the perplexity. We catch this error and
+set the perplexity to infinity in these instances. Now that we have all these
+helper functions in place we are now ready to write the main part of the
+script:
+
+
+
+This is quite a code block but remember that we this is all the code you
+need to train a large language model on a distributed infrastructure. Let’s
+deconstruct the script a little bit and highlight the most important parts:
+Model saving
+We added the script to the model repository. This allows us to simply
+clone the model repository on a new machine and have everything to
+get started. At the start we checkout a new branch with the run_name
+we get from Weights & Biases but this could be any name for this
+experiment. Later, we commit the model at each checkpoint to hub.
+With that setup each experiment is on a new branch and each commit
+
+represents a model checkpoint. Note, that we need a
+wait_for_everyone and unwrap_model to make sure the model
+is properly synchronized when we store it.
+Optimization
+For the model optimization we use the AdamW optimizer with a cosine
+learning rate schedule after a linear warming up period. For the
+hyperparameters we closely follow the parameters described in the
+GPT-3 paper9 for similar sized models.
+Evaluation
+We evaluate the model on the evaluation set everytime we save that is
+every save_checkpoint_steps and after training. Along with the
+validation loss we also log the validation perplexity.
+Gradient accumulation
+Since we can not expect that a full batch size fits on the machine, even
+when we run this on a large infrastructure. Therefore, we implement
+gradient accumulation and can gather gradients from several backward
+passes and optimize once we have accumulated enough steps.
+One aspect that might still be a bit obscure at this point is what it actually
+means to train a model on multiple GPUs? There are several approaches to
+train models in a distributed fashion depending on the size of your model
+and volume of data. The approach utilized by Accelerate is called Data
+Distributed Parallelism (DDP). The main advantage of this approach is that
+it allows you to train models faster with larger batch sizes that would fit into
+any single GPU. The process is illustrated in Figure 10-6.
+
+Figure 10-6. Illustration of the processing steps in Data Distributed Parallelism with four GPUs.
+
+Let’s go through pipeline step by step on:
+1. Each worker consists of a GPU and a fraction of the CPU cores.
+The data loader prepares a batch of data and sends it to the model. .
+Each GPU receives a batch of data and calculates the loss and
+respective gradients with a local copy of the model.
+2. All gradients from each node are averaged with a reduce pattern
+and the averaged gradients are sent back to each note.
+3. The gradients are applied with the optimizer on each node
+individually. Although this might seem like redundant work it
+avoids sending copies of the models around between the nodes. We
+need to update the models at least once anyway and for that time
+the other nodes would need to wait until they receive the updated
+version.
+4. Once all models are updated we go back to step one and repeat
+until we reached the end of training.
+This simple pattern allows us to train large models extremely fast without
+much complicated logic. Sometimes, however this is not enough if for
+example the model does not fit on a single GPU in which case one needs
+another strategy called Model Parallelism.10
+
+Training Run
+
+Now let’s copy this training script in a file that we call
+codeparrot_training.py such that we can execute it on our training
+server. To make life even easier we can add it to the model repository on the
+hub. Remember that the models on the hub are essentially git repository so
+we can just clone the repository, add any files we want and then push them
+back to the hub. One the remote training server you can then spin-up
+training with the following commands:
+
+And that’s it! Note that wandb login will prompt you to authenticate
+with Weights & Biases for logging and the accelerate config
+command will guide you through setting up the infrastructure. There you
+can define on what infrastructure you want to train on, if you want to enable
+mixed precision training among other settings. After that setup you can run
+the script locally on a CPU, on a single GPU or in the cloud on a distributed
+GPU infrastructure and even TPUs. We used a a2-megagpu-16g
+instance for all experiments which is a workstation with 16 x A100 GPUs
+with 40GB of memory each. You can see the settings used for this
+experiment in Table 10-1.
+
+
+Running the training script with these settings on that infrastructure takes
+about 24h. If you train your own custom model make sure your code runs
+smoothly on smaller infrastructure in order to make sure that expensive
+long run goes smoothly. After the run successfully completes and you can
+merge the experiment branch on the hub back into master with the
+following commands:
+
+
+Naturally, experiment-branch should be the name of the experiment
+branch on the hub you would like to merge. Now that we have a trained
+model let’s have a look at how we can investigate it’s performance.
+
+Model Analysis
+So what can we do with our freshly baked language straight out of the GPU
+ofen? Well, we can use it to write some code for us. There are two types of
+analysis we can conduct: qualitative and quantitative. In the former we can
+look at concrete examples and try to better understand in which cases the
+model succeeds and where it fails. In the latter case we evaluate the model
+
+on a large set of test cases and evaluate it’s performance statistically. In this
+section we have a look at how we can use the model and have a look at a
+few examples and then discuss how we can evaluate the model
+systematically and more robustly. First, let’s wrap the model in a pipeline
+and use it to continue some code inputs:
+
+We will use the generation pipeline to generate candidate completions given
+a prompt. In order to keep the generations brief we just show the code of
+one block of code by splitting off any new function or class definition as
+well as comments on new lines.
+
+
+Let’s start with a simple example and have the model write a function for us
+that converts hours to minutes:
+
+That seems work pretty well. The function rounds to even hours but the
+function definition was also ambiguous. Let’s have a look at another
+function:
+
+Although the mathematical expression go in the right direction it is clear
+that the model does not know how to calculate the area of a rectangle. Let’s
+test it’s knowledge on a class for complex numbers:
+
+That looks pretty good! The model correctly setup a class which contains to
+components self.x and self.y and implements an addition operator
+the correct way! Now can it also solve a more complex task of extracting
+URLs from an HTML string. Let’s give the model a few attempts to get it
+right:
+
+Although it didn’t quite get it the first three times the last attempt looks
+about right. Finally, let’s see if we can use the model to translate a function
+from pure Python to numpy:
+
+Also that seems to work as expected! Experimenting with a model and
+investigating it’s performance on a few samples can give us useful insights
+to when it works well. However, to properly evaluate it we need to run it on
+many more examples and run some statistics.
+
+In Chapter 8 we explored a few metrics useful to measure the quality of text
+generations. Among these metrics was for example BLEU which is
+frequently used for that purpose. While this metric has limitations in
+general it is particularly bad suited for our use case with code generations.
+The BLEU score measures the overlap of n-grams between the reference
+texts and the text generations. When writing code we have a lot of freedom
+naming things such as variables and classes and the success of a program
+does not depend on the naming scheme as long as it is consistent. However,
+the BLEU score would punish a generation that deviates from the reference
+naming which might in fact be almost impossible to predict, even for a
+human coder.
+In software development there are much better and more reliable ways to
+measure the quality of code such as unit tests. With this approach all the
+OpenAI Codex models were evaluated by running several code generations
+for coding tasks through a set of unit tests and calculating the fraction of
+generations that pass the tests11. For a proper performance measure we
+should apply the same evaluation regimen to our models but this is beyond
+the scope of this chapter.
+
+Conclusion
+Let’s take a step back for a moment and contemplate what we have
+achieved in this chapter. We set out to create a code auto-complete function
+for Python. First we built a custom, large scale dataset suitable for
+pretraining a large language model. Then we created a custom tokenizer
+that is able to efficiently encode Python code with that dataset. Finally, with
+the help of accelerate we put everything together and wrote a training script
+to train a large GPT-2 model from scratch on a multi-GPU infrastructure
+with as few as 200 lines of code. Investigating the model output we saw that
+it can generate reasonable code continuations and discussed how the model
+could be systematically evaluated.
+You now not only now how to fine-tune any of the many pretrained models
+on the hub but also how to pretrain a custom model from scratch when you
+
+have enough data and compute available. You are now setup to tackle
+almost any NLP models with transformers. So the question is where to
+next? In the next and last chapter we have a look at where the field is
+currently moving and what new exciting applications and domains beyond
+NLP transformer models can tackle.

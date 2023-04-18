@@ -1,0 +1,284 @@
+Chapter 2
+ Text ClassificationNow imagine that you are a data scientist who needs to build a system that can automaticallyidentify emotional states such as “anger” or “joy” that people express towards your company’sproduct on Twitter
+ Until 2018, the deep learning approach to this problem typically involvedfinding a suitable neural architecture for the task and training it from scratch on a dataset oflabeled tweets
+ This approach suffered from three major drawbacks:You needed a lot of labeled data to train accurate models like recurrent orconvolutional neural networks
+Training these models from scratch was time consuming and expensive
+The trained model could not be easily adapted to a new task, e
+g
+ with a different set oflabels
+Nowadays, these limitations are largely overcome via transfer learning, where typically aTransformer-based architecture is pretrained on a generic task such as language modeling andthen reused for a wide variety of downstream tasks
+ Although pretraining a Transformer caninvolve significant data and computing resources, many of these language models are madefreely available by large research labs and can be easily downloaded from the Hugging FaceModel Hub!This chapter will guide you through several approaches to emotion detection using a famousTransformer model called BERT, short for Bidirectional Encoder Representations fromTransformers
+1 This will be our first encounter with the three core libraries from the HuggingFace ecosystem: Datasets, Tokenizers, and Transformers
+ As shown in Figure 2-2, theselibraries will allow us to quickly go from raw text to a fine-tuned model that can be used forinference on new tweets
+ So in the spirit of Optimus Prime, let’s dive in, “transform androllout!”The DatasetTo build our emotion detector we’ll use a great dataset from an article2 that explored howemotions are represented in English Twitter messages
+ Unlike most sentiment analysis datasetsthat involve just “positive” and “negative” polarities, this dataset contains six basic emotions:anger, disgust, fear, joy, sadness, and surprise
+ Given a tweet, our task will be to train a modelthat can classify it into one of these emotions!A First Look at Hugging Face DatasetsWe will use the Hugging Face Datasets library to download the data from the Hugging FaceDataset Hub
+ This library is designed to load and process large datasets efficiently, share themwith the community, and simplify interoperatibility between NumPy, Pandas, PyTorch, andTensorFlow
+ It also contains many NLP benchmark datasets and metrics, such as the StanfordQuestion Answering Dataset (SQuAD), General Language Understanding Evaluation (GLUE),and Wikipedia
+ We can use the list_datasets function to see what datasets are availablein the Hub
+This looks like the dataset we’re after, so next we can load it with the load_datasetfunction from Datasets
+In each case the resulting data structure depends on the type of query; although this may feelstrange at first, it’s part of the secret sauce that makes Datasets so flexible!So now that we’ve seen how to load and inspect data with Datasets let’s make a few sanitychecks about the content of our tweets
+From Datasets to DataFramesAlthough Datasets provides a lot of low-level functionality to slice and dice our data, it is oftenconvenient to convert a Dataset object to a Pandas DataFrame so we can access highlevel APIs for data visualization
+ To enable the conversion, Datasets provides aDataset
+set_format function that allow us to change the output format of the Dataset
+This does not change the underlying data format which is Apache Arrow and you can switch toanother format later if needed
+As we can see, the column headers have been preserved and the first few rows match ourprevious views of the data
+Before diving into building a classifier let’s take a closer look at the dataset
+ As AndrejKarpathy famously put it, becoming “one with the data”3 is essential to building great models
+Look at the Class DistributionWhenever you are working on text classification problems, it is a good idea to examine thedistribution of examples among each class
+ For example, a dataset with a skewed classdistribution might require a different treatment in terms of the training loss and evaluationmetrics than a balanced one
+We can see that the dataset is heavily imbalanced; the joy and sadness classes appearfrequently whereas love and sadness are about 5-10 times rarer
+ There are several ways todeal with imbalanced data such as resampling the minority or majority classes
+ Alternatively,we can also weight the loss function to account for the underrepresented classes
+ However, tokeep things simple in this first practical application we leave these techniques as an exercise forthe reader and move on to examining the length of our tweets
+How Long Are Our Tweets?Transformer models have a maximum input sequence length that is referred to as the maximumcontext size
+ For most applications with BERT, the maximum context size is 512 tokens, wherea token is defined by the choice of tokenizer and can be a word, subword, or character
+ Let’smake a rough estimate of our tweet lengths per emotion by looking at the distribution of wordsper tweet
+From the plot we see that for each emotion, most tweets are around 15 words long and thelongest tweets are well below BERT’s maximum context size of 512 tokens
+ Texts that arelonger than a model’s context window need to be truncated, which can lead to a loss inperformance if the truncated text contains crucial information
+ Let’s now figure out how we canconvert these raw texts into a format suitable for Transformers!From Text to TokensTransformer models like BERT cannot receive raw strings as input; instead they assume thetext has been tokenized into numerical vectors
+ Tokenization is the step of breaking down astring into the atomic units used in the model
+ There are several tokenization strategies one canadopt and the optimal splitting of words in sub-units is usually learned from the corpus
+ Beforelooking at the tokenizer used for BERT, let’s motivate it by looking at two extreme cases:character and word tokenizers
+Character TokenizationThe simplest tokenization scheme is to feed each character individually to the model
+ InPython, str objects are really arrays under the hood which allows us to quickly implementcharacter-level tokenization with just one line of code
+This is a good start but we are not yet done because our model expects each character to beconverted to an integer, a process called numericalization
+We are almost done! Each token has been mapped to a unique, numerical identifier, hence thename input_ids
+ The last step is to convert input_ids into a 2d tensor of one-hot vectorswhich are better suited for neural networks than the categorical representation of input_ids
+The reason for this is that the elements of input_ids create an ordinal scale, so adding orsubtracting two IDs is a meaningless operation since the result in a new ID that representsanother random token
+ On the other hand, the result of the adding two one-hot encodings can beeasily interpreted: the two entries that are “hot” indicate that the corresponding two tokens cooccur
+ From our simple example we can see that character-level tokenization ignores any structure inthe texts such as words and treats them just as streams of characters
+ Although this helps dealwith misspellings and rare words, the main drawback is that linguistic structures such as wordsneed to be learned, and that process requires significant compute and memory
+ For this reason,character tokenization is rarely used in practice
+ Instead, some structure of the text such aswords is preserved during the tokenization step
+ Word tokenization is a straightforwardapproach to achieve this - let’s have a look at how it works!Word TokenizationInstead of splitting the text into characters, we can split it into words and map each word to aninteger
+ By using words from the outset, the model can skip the step of learning words fromcharacters and thereby eliminate complexity from the training process
+From here we can take the same steps we took for the character tokenizer and map each wordto a unique identifier
+ However, we can already see one potential problem with thistokenization scheme; punctuation is not accounted for, so NLP
+ is treated as a single token
+Given that words can include declinations, conjugations, or misspellings, the size of thevocabulary can easily grow into the millions!NOTEThere are variations of word tokenizers that have extra rules for punctuation
+ One can also apply stemming whichnormalises the words to their stem (e
+g
+ “great”, “greater”, and “greatest” all become “great”) at the expense oflosing some information in the text
+The reason why having a large vocabulary is a problem is that it requires neural networks withan enormous number of parameters
+ To illustrate this, suppose we have 1 million unique wordsand want to compress the 1-million dimensional input vectors to 1-thousand dimensionalvectors in the first layer of a neural network
+ This is a standard step in most NLP architecturesand the resulting weight matrix of this vector would contain 1 million × 1 thousand weights =1 billion weights
+ This is already comparable to the largest GPT-2 model which has 1
+4 billionparameters in total!Naturally, we want to avoid being so wasteful with our model parameters since they areexpensive to train and larger models are more difficult to maintain
+ A common approach is tolimit the vocabulary and discard rare words by considering say the 100,000 most commonwords in the corpus
+ Words that are not part of the vocabulary are classified as “unknown” andmapped to a shared UNK token
+ This means that we lose some potentially important informationin the process of word tokenization since the model has no information about which wordswere associated with the UNK tokens
+Wouldn’t it be nice if there was a compromise between character and word tokenization thatpreserves all input information and some of the input structure? There is! Let’s look at the mainideas behind subword tokenization
+Subword TokenizationThe idea behind subword tokenization is to take the best of both worlds from character andword tokenization
+ On one hand we want to use characters since they allow the model to dealwith rare character combinations and misspellings
+ On the other hand, we want to keep frequentwords and word parts as unique entities
+WARNINGChanging the tokenization of a model after pretraining would be catastrophic since the learned word and subwordrepresentations would become obsolete! The Transformers library provides functions to make sure the righttokenizer is loaded for the corresponding Transformer
+There are several subword tokenization algorithms such as Byte-Pair-Encoding, WordPiece,Unigram, and SentencePiece
+ Most of them adopt a similar strategy:Simple tokenizationThe text corpus is split into words, usually according to whitespace and punctuation rules
+CountingAll the words in the corpus are counted and the tally is stored
+SplittingThe words in the tally are split into subwords
+ Initially these are characters
+Subword pairs countingUsing the tally, the subword pairs are counted
+MergingBased on a rule, some of the subword pairs are merged in the corpus
+StoppingThe process is stopped when a predefined vocabulary size is reached
+There are several variations of this procedure in the above algorithms and the TokenizerSummary in the Transformers documentation provides detailed information about eachtokenization strategy
+ The main distinguishing feature of subword tokenization (as well as wordtokenization) is that it is learned from the corpus used for pretraining
+ Let’s have a look at howsubword tokenization actually works using the Hugging Face Transformers library!Using Pretrained TokenizersWe’ve noted that loading the right pretrained tokenizer for a given pretrained model is crucialto getting sensible results
+ The Transformers library provides a convenientfrom_pretrained function that can be used to load both objects, either from the HuggingFace Model Hub or from a local path
+To build our emotion detector we’ll use a BERT variant called DistilBERT,4 which is adownscaled version of the original BERT model
+ The main advantage of this model is that itachieves comparable performance to BERT while being significantly smaller and moreefficient
+ This enables us to train a model within a few minutes and if you want to train a largerBERT model you can simply change the model_name of the pretrained model
+ The interfaceof the model and the tokenizer will be the same, which highlights the flexibility of theTransformers library; we can experiment with a wide variety of Transformer models by justchanging the name of the pretrained model in the code!TIPIt is a good idea to start with a smaller model so that you can quickly build a working prototype
+ Once you’reconfident that the pipeline is working end-to-end, you can experiment with larger models for performance gains
+where the AutoTokenizer class ensures we pair the correct tokenizer and vocabulary withthe model architecture
+We can examine a few attributes of the tokenizer such as the vocabulary size:We can observe two things
+ First, the [CLS] and [SEP] tokens have been addedautomatically to the start and end of the sequence, and second, the long wordcomplicatedtest has been split into two tokens
+ The ## prefix in ##test signifies thatthe preceding string is not a whitespace and that it should be merged with the previous token
+Now that we have a basic understanding of the tokenization process we can use the tokenizer tofeed tweets to the model
+Training a Text ClassifierAs discussed in Chapter 2, BERT models are pretrained to predict masked words in a sequenceof text
+ However, we can’t use these language models directly for text classification, so insteadwe need to modify them slightly
+ To understand what modifications are necessary let’s revisitthe BERT architecture depicted in Figure 2-3
+First, the text is tokenized and represented as one-hot vectors whose dimension is the size ofthe tokenizer vocabulary, usually consisting of 50k-100k unique tokens
+ Next, these tokenencodings are embedded in lower dimensions and passed through the encoder block layers toyield a hidden state for each input token
+ For the pretraining objective of language modeling,each hidden state is connected to a layer that predicts the token for the input token, which isonly non-trivial if the input token was masked
+ For the classification task, we replace thelanguage modeling layer with a classification layer
+ BERT sequences always start with aclassification token [CLS], therefore we use the hidden state for the classification token asinput for our classification layer
+NOTEIn practice, PyTorch skips the step of creating a one-hot vector because multiplying a matrix with a one-hot vectoris the same as extracting a column from the embedding matrix
+ This can be done directly by getting the columnwith the token ID from the matrix
+We have two options to train such a model on our Twitter dataset:Feature extractionWe use the hidden states as features and just train a classifier on them
+Fine-tuningWe train the whole model end-to-end, which also updates the parameters of the pretrainedBERT model
+In this section we explore both options for DistilBert and examine their trade-offs
+Transformers as Feature ExtractorsTo use a Transformer as a feature extractor is fairly simple; as shown in Figure 2-4 we freezethe body’s weights during training and use the hidden states as features for the classifier
+ Theadvantage of this approach is that we can quickly train a small or shallow model
+ Such a modelcould be a neural classification layer or a method that does not rely on gradients such aRandom Forest
+ This method is especially convenient if GPUs are unavailable since the hiddenstates can be computed relatively fast on a CPU
+Figure 2-4
+ In the feature-based approach, the BERT model is frozen and just provides features for a classifier
+The feature-based method relies on the assumption that the hidden states capture all theinformation necessary for the classification task
+ However, if some information is not requiredfor the pretraining task, it may not be encoded in the hidden state, even if it would be crucialfor the classification task
+ In this case the classification model has to work with suboptimaldata, and it is better to use the fine-tuning approach discussed in the following section
+Here we’ve used PyTorch to check if a GPU is available and then chained the PyTorchnn
+Module
+to("cuda") method to the model loader; without this, we would execute themodel on the CPU which can be considerably slower
+The AutoModel class corresponds to the input encoder that translates the one-hot vectors toembeddings with positional encodings and feeds them through the encoder stack to return thehidden states
+ The language model head that takes the hidden states and decodes them to themasked token prediction is excluded since it is only needed for pretraining
+ If you want to usethat model head you can load the complete model with AutoModelForMaskedLM
+We can now pass this tensor to the model to extract the hidden states
+ Depending on the modelconfiguration, the output can contain several objects such as the hidden states, losses, orattentions, that are arranged in a class that is similar to a namedtuple in Python
+ In ourexample, the model output is a Python dataclass called BaseModelOutput, and like anyclass, we can access the attributes by name
+ Since the current model returns only one entrywhich is the last hidden state, let’s pass the encoded text and examine the outputs:Looking at the hidden state tensor we see that it has the shape [batch_size, n_tokens,hidden_dim]
+ The way BERT works is that a hidden state is returned for each input, and themodel uses these hidden states to predict masked tokens in the pretraining task
+ Forclassification tasks, it is common practice to use the hidden state associated with the [CLS]token as the input feature, which is located at the first position in the second dimension
+Tokenizing the Whole DatasetNow that we know how to extract the hidden states for a single string, let’s tokenize the wholedataset! To do this, we can write a simple function that will tokenize our examples
+we see that the result is a dictionary, where each value is a list of lists generated by thetokenizer
+ In particular, each sequence in input_ids starts with 101 and ends with 102,followed by zeroes, corresponding to the [CLS], [SEP], and [PAD] tokens respectively:Also note that in addition to returning the encoded tweets as input_ids, the tokenizer alsoreturns list of attention_mask arrays
+ This is because we do not want the model to getconfused by the additional padding tokens, so the attention mask allows the model to ignore thepadded parts of the input
+ See Figure 2-5 for a visual explanation on how the input IDs andattention masks are formatted
+WARNINGSince the input tensors are only stacked when passing them to the model, it is important that the batch size of thetokenization and training match and that there is no shuffling
+ Otherwise the input tensors may fail to be stackedbecause they have different lengths
+ This happens because they are padded to the maximum length of thetokenization batch which can be different for each batch
+ When in doubt, set batch_size=None in thetokenization step since this will apply the tokenization globally and all input tensors will have the same length
+This will, however, use more memory
+ We will introduce an alternative to this approach with a collate functionwhich only joins the tensors when they are needed and pads them accordingly
+To apply our tokenize function to the whole emotions corpus, we’ll use theDatasetDict
+map function
+ This will apply tokenize across all the splits in the corpus,so our training, validation and test data will be preprocessed in a single line of code:emotions_encoded = emotions
+map(tokenize, batched=True, batch_size=None)By default, DatasetDict
+map operates individually on every example in the corpus, sosetting batched=True will encode the tweets in batches, while batch_size=Noneapplies our tokenize function in one single batch and ensures that the input tensors andattention masks have the same shape globally
+ We can see that this operation has added twonew features to the dataset: input_ids and the attention mask
+From Input IDs to Hidden StatesNow that we have converted our tweets to numerical inputs, the next step is to extract the lasthidden states so that we can feed them to a classifier
+ If we had a single example we couldsimply pass the input_ids and attention_mask to the model as followsbut what we really want are the hidden states across the whole dataset
+ For this, we can use theDatasetDict
+map function again! Let’s define a forward_pass function that takes abatch of input IDs and attention masks, feeds them to the model, and adds a newhidden_state feature to our batch
+Creating a Feature MatrixThe preprocessed dataset now contains all the information we need to train a clasifier on it
+ Wewill use the hidden states as input features and the labels as targets
+ We can easily create thecorresponding arrays in the well known Scikit-Learn format as follows
+Dimensionality Reduction with UMAPBefore we train a model on the hidden states, it is good practice to perform a sanity check thatthey provide a useful representation of the emotions we want to classify
+ Since visualising thehidden states in 768 dimensions is tricky to say the least, we’ll use the powerful UMAP5algorithm to project the vectors down to 2D
+ Since UMAP works best when the features arescaled to lie in the [0,1] interval, we’ll first apply a MinMaxScaler and then use UMAP toreduce the hidden states
+The result is an array with the same number of training samples, but with only 2 featuresinstead of the 768 we started with! Let us investigate the compressed data a little bit further andplot the density of points for each category separately
+NOTEThese are only projections onto a lower dimensional space
+ Just because some categories overlap does not meanthat they are not separable in the original space
+ Conversely, if they are separable in the projected space they willbe separable in the original space
+Now there seem to be clearer patterns; the negative feelings such as sadness, anger andfear all occupy a similar regions with slightly varying distributions
+ On the other hand, joyand love are well separated from the negative emotions and also share a similar space
+Finally, surprise is scattered all over the place
+ We hoped for some separation but this in noway guaranteed since the model was not trained to know the difference between this emotionsbut learned them implicitly by predicting missing words
+Training a Simple ClassifierWe have seen that the hidden states are somewhat different between the emotions, although forseveral of them there is not an obvious boundary
+ Let’s use these hidden states to train a simplelogistic regressor with Scikit-Learn! Training such a simple model is fast and does not require aGPU
+By looking at the accuracy it might appear that our model is just a bit better than random, butsince we are dealing with an unbalanced multiclass dataset this is significantly better thanrandom
+ We can get a better feeling for whether our model is any good by comparing against asimple baseline
+ In Scikit-Learn there is a DummyClassifier that can be used to build aclassifier with simple heuristics such as always choose the majority class or always draw a random class
+ which yields an accuracy of about 35%
+ So our simple classifier with BERT embeddings issignificantly better than our baseline
+ We can further investigate the performance of the modelby looking at the confusion matrix of the classifier, which tells us the relationship between thetrue and predicted labels
+We can see that anger and fear are most often confused with sadness, which agrees withthe observation we made when visualizing the embeddings
+ Also love and surprise arefrequently mistaken for joy
+To get an even better picture of the classification performance we can print Scikit-Learn’sclassification report and look at the precision, recall and F -score for each class:In the next section we will explore the fine-tuning approach which leads to superiorclassification performance
+ It is however important to note, that doing this requires much morecomputational resources, such as GPUs, that might not be available in your company
+ In caseslike this, a feature-based approach can be a good compromise between doing traditionalmachine learning and deep learning
+Fine-tuning TransformersLet’s now explore what it takes to fine-tune a Transformer end-to-end
+ With the fine-tuningapproach we do not use the hidden states as fixed features, but instead train them as shown inFigure 2-6
+ This requires the classification head to be differentiable, which is why this methodusually uses a neural network for classification
+ Since we retrain all the DistilBERT parameters,this approach requires much more compute than the feature extraction approach and typicallyrequires a GPU
+Since we train the hidden states that serve as inputs to the classification model, we also avoidthe problem of working with data that may not be well suited for the classification task
+ Instead,the initial hidden states adapt during training to decrease the model loss and thus increase itsperformance
+ If the necessary compute is available, this method is commonly chosen over thefeature-based approach since it usually outperforms it
+We’ll be using the Trainer API from Transformers to simplify the training loop - let’s look atthe ingredients we need to set one up!he first thing we need is a pretrained DistilBERT model like the one we used in the featurebased approach
+ The only slight modification is that we use theAutoModelForSequenceClassification model instead of AutoModel
+ Thedifference is that the AutoModelForSequenceClassification model has aclassification head on top of the model outputs which can be easily trained with the base model
+We just need to specify how many labels the model has to predict (six in our case), since thisdictates the number of outputs the classification head has
+You will probably see a warning that some parts of the models are randomly initialized
+ This isnormal since the classification head has not yet been trained
+Preprocess the TweetsIn addition to the tokenization we also need to set the format of the columns totorch
+Tensor
+ This allows us to train the model without needing to change back and forthbetween lists, arrays, and tensors
+ With Datasets we can use the set_format function tochange the data type of the columns we wish to keep, while dropping all the rest
+Furthermore, we define some metrics that are monitored during training
+ This can be anyfunction that takes a prediction object, that contains the model predictions as well as the correctlabels and returns a dictionary with scalar metric values
+ We will monitor the F -score and theaccuracy of the model
+Training the ModelHere we also set the batch size, learning rate, number of epochs, and also specify to load thebest model at the end of the training run
+ With this final ingredient, we can instantiate and finetune our model with the TrainerEpochTraining LossValidation LossAccuracyLooking at the logs we can see that our model has an F score on the validation set of around92% - this is a significant improvement over the feature-based approach! We can also see thatthe best model was saved by running the evaluate method:Let’s have a more detailed look at the training metrics by calculating the confusion matrix
+Visualize the Confusion MatrixTo visualise the confusion matrix, we first need to get the predictions on the validation set
+ Thepredict function of the Trainer class returns several useful objects we can use forevaluation
+It also contains the raw predictions for each class
+ We decode the predictions greedily with anargmax
+ This yields the predicted label and has the same format as the labels returned by theScikit-Learn models in the feature-based approach
+With the predictions we can plot the confusion matrix again:We can see that the predictions are much closer to the ideal diagonal confusion matrix
+ Thelove category is still often confused with joy which seems natural
+ Furthermore, surpriseand fear are often confused and surprise is additionally frequently mistaken for joy
+Overall the performance of the model seems very good
+Also, looking at the classification report reveals that the model is also performing much betterfor minority classes like surprise
+recallf1-scoresupportsadnessjoyloveangerfearsurpriseMaking PredictionsWe can also use the fine-tuned model to make predictions on new tweets
+ First, we need totokenize the text, pass the tensor through the model, and extract the logits
+The model predictions are not normalized meaning that they are not a probability distributionbut the raw outputs before the softmax layer
+We can easily make the predictions a probability distribution by applying a softmax function tothem
+ Since we have a batch size of 1, we can get rid of the first dimension and convert thetensor to a NumPy array for processing on the CPU
+We can see that the probabilities are now properly normalized by looking at the sum whichadds up to 1
+Error AnalysisBefore moving on we should investigate our model’s prediction a little bit further
+ A simple, yetpowerful tool is to sort the validation samples by the model loss
+ When passing the label duringthe forward pass, the loss is automatically calculated and returned
+ Below is a function thatreturns the loss along with the predicted label
+following
+Wrong labelsEvery process that adds labels to data can be flawed; annotators can make mistakes ordisagree, inferring labels from other features can fail
+ If it was easy to automaticallyannotate data then we would not need a model to do it
+ Thus, it is normal that there aresome wrongly labeled examples
+ With this approach we can quickly find and correct them
+Quirks of the datasetDatasets in the real world are always a bit messy
+ When working with text it can happenthat there are some special characters or strings in the inputs that throw the model off
+Inspecting the model’s weakest predictions can help identify such features, and cleaning thedata or injecting similar examples can make the model more robust
+Lets first have a look at the data samples with the highest losses
+im lazy my characters fall into categories of smug and or blas joypeople and their foils people who feel inconvenienced bysmug and or blas peoplefeari called myself pro life and voted for perry without knowingthis information i would feel betrayed but moreover i wouldfeel that i had betrayed god by supporting a man whomandated a barely year old vaccine for little girls puttingthem in danger to financially support people close to himjoysadnessi also remember feeling like all eyes were on me all the timeand not in a glamorous way and i hated itjoyangerim kind of embarrassed about feeling that way thoughbecause my moms training was such a wonderfully definingpart of my own life and i loved and still lovelovesadnessi feel badly about reneging on my commitment to bringdonuts to the faithful at holy family catholic church incolumbus ohiolovesadnessi guess i feel betrayed because i admired him so much and for joysomeone to do this to his wife and kids just goes beyond thepalesadnesswhen i noticed two spiders running on the floor in differentdirectionsangerfearid let you kill it now but as a matter of fact im not feelingfrightfully well todayjoyfeari feel like the little dorky nerdy kid sitting in his backyard all joyby himself listening and watching through fence to the littlepopular kid having his birthday party with all his cool friendsthat youve always wished were yoursWe can clearly see that the model predicted some of the labels wrong
+ On the other hand itseems that there are quite a few examples with no clear class which might be either mislabelledor require an new class altogether
+ In particular, joy seems to be mislabelled several times
+ Withthis information we can refine the dataset which often can lead to as much or more performancegain as having more data or larger models!When looking at the samples with the lowest losses, we observe that the model seems to bemost confident when predicting the sadness class
+ Deep learning models are exceptionallygood at finding and exploiting shortcuts to get to a prediction
+ A famous analogy to illustrateThis is the German horse Hans from the early 20th century
+ Hans was a big sensation since hewas apparently able to do simple arithmetic such as adding two numbers by tapping the result;a skill which earned him the nickname Clever Hans
+ Later studies revealed that Hans wasactually not able to do arithmetic but could read the face of the questioner and determine basedon the facial expression when he reached the correct result
+Deep learning models tend to find similiar exploits if the features allow it
+ Imagine we build asentiment model to analyze customer feedback
+ Let’s suppose that by accident the number ofstars the customer gave are also included in the text
+ Instead of actually analysing the text, themodel can then simply learn to count the stars in the review
+ When we deploy that model inproduction and it no longer has access to that information it will perform poorly and thereforewe want to avoid such situations
+ For this reason it is worth investing time by looking at theexamples that the model is most confident about so that we can be confident that the modeldoes not exploit certain features of the text
+We now know that the joy is sometimes mislabelled and that the model is most confident aboutgiving the label sadness
+ With this information we can make targeted improvements to our dataset and also keep an eye on the class the model seems to be very confident about
+ The laststep before serving the trained model is to save it for later usage
+ The Transformer libraryallows to do this in a few steps which we show in the next section
+Saving the ModelFinally, we want to save the model so we can reuse it in another session or later if we want toput it in production
+ We can save the model together with the right tokenizer in the same folderThe NLP community benefits greatly from sharing pretrained and fine-tuned models, andeverybody can share their models with others via the Hugging Face Model Hub
+ Through theHub, all community-generated models can be downloaded just like we downloaded theDistilBert model
+Once you are logged in with your Model Hub credentials, the next step is to create a Gitrepository for storing your model, tokenizer, and any other configuration files:transformers-cli repo create distilbert-emotionThis creates a repository on the Model Hub which can be cloned and versioned like any otherGit repository
+ The only subtlety is that the Model Hub uses Git Large File Storage for modelversioning, so make sure you install that before cloning the repository:Now we have saved our first model for later
+ This is not the end of the journey but just the firstiteration
+ Building performant models requires many iterations and thorough analysis and in thenext section we list a few points to get further performance gains
+Further ImprovementsThere are a number of things we could try to improve the feature-based model we trained thischapter
+ For example, since the hidden states are just features for the model, we could includeadditional features or manipulate the existing ones
+ The following steps could yield furtherimprovement and would be good exercises:Address the class imbalance by up- or down-sampling the minority or majority classesrespectively
+ Alternatively, the imbalance could also be adressed in the classificationmodel by weighting the classes
+Add more embeddings from different models
+ There are many BERT-like models thathave a hidden state or output we could use such as ALBERT, GPT-2 or ELMo
+ Youcould concatenate the tweet embedding from each model to create one large inputfeature
+Apply traditional feature engineering
+ Besides using the embeddings from Transformermodels, we could also add features such as the length of the tweet or whether certainemojis or hashtags are present
+Although the performance of the fine-tuned model already looks promising there are still a fewthings you can try to improve it: - We used default values for the hyperparameters such aslearning rate, weight decay, and warmup steps, which work well for standard classificationtasks
+ However the model could still be improved with tuning them and see Chapter 5 wherewe use Optuna to systematically tune the hyperparameters
+ - Distilled models are great for theirperformance with limited computational resources
+ For some applications (e
+g
+ batch-baseddeployments), efficiency may not be the main concern, so you can try to improve theperformance by using the full model
+ To squeeze out every last bit of performance you can alsotry ensembling several models
+ - We discovered that some labels might be wrong which issometimes referred to as label noise
+ Going back to the dataset and cleaning up the labels is anessential step when developing NLP applications
+ - If label noise is a concern you can alsothink about applying label smoothing
+6 Smoothing out the target labels ensures that the modeldoes not get overconfident and draws clearer decision boundaries
+ Label smoothing is alreadybuilt-in the Trainer and can be controlled via the label_smoothing_factor argument
+ConclusionCongratulations, you now know how to train a Transformer model to classify the emotions intweets! We have seen two complimentary approaches useing features and fine-tuning andinvestigated their strengths and weaknesses
+ Improving either model is an open-endedendeavour and we listed several avenues to further improve the model and the dataset
+However, this is just the first step towards building a real-world application with Transformersso where to from here? Here’s a list of challenges you’re likely to experience along the waythat we cover in this book:My boss wants my model in production yesterday! - In the next chapter we’ll show youhow to package our model as a web application that you can deploy and share withyour colleagues
+My users want faster predictions! - We’ve already seen in this chapter that DistilBERTis one approach to this problem and in later chapters we’ll dive deep into howdistillation actually works, along with other tricks to speed up your Transformermodels
+Can your model also do X? - As we’ve alluded to in this chapter, Transformers areextremely versatile and for the rest of the book we will be exploring a range of taskslike question-answering and named entity recognition, all using the same basicarchitecture
+None of my text is in English! - It turns out that Transformers also come in amultilingual variety, and we’ll use them to tackle tasks in several languages at once
+I don’t have any labels! - Transfer learning allows you to fine-tune on few labels andwe’ll show you how they can even be used to efficiently annotate unlabeled data
+In the next chapter we’ll look at how Transformers can be used to retrieve information fromlarge corpora and find answers to specific questions

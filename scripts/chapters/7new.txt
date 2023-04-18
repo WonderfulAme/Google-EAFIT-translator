@@ -1,0 +1,408 @@
+Chapter 7
+ Dealing With Few toNo LabelsA NOTE FOR EARLY RELEASE READERSWith Early Release ebooks, you get books in their earliest form—theauthor’s raw and unedited content as they write—so you can takeadvantage of these technologies long before the official release of thesetitles
+This will be the 7th chapter of the final book
+ Please note that theGitHub repo will be made active later on
+If you have comments about how we might improve the content and/orexamples in this book, or if you notice missing material within thischapter, please reach out to the editor at mpotter@oreilly
+com
+There is one question so deeply ingrained into every data scientist’s mindthat it’s usually the first thing they ask at the start of a new project: is thereany labeled data? More often than not, the answer is “no” or “a little bit”,followed by an expectation from the client that your team’s fancy machinelearning models should still perform well
+ Since training models on verysmall datasets does not typically yield good results, one obvious solution isto annotate more data
+ However, this takes time and can be very expensive,especially if each annotation requires domain expertise to validate
+Fortunately, there are several methods that are well suited for dealing withfew to no labels! You may already be familiar with some of them such aszero-shot or few-shot learning from GPT-3’s impressive ability to perform adiverse range of tasks from just a few dozen examples
+In general, the best performing method will depend on the task, the amountof available data and what fraction is labeled
+ A decision tree is shown inFigure 7-1 to help guide us through the process
+Figure 7-1
+ Several techniques that can be used to improve model performance in the absence oflarge amounts of labeled data
+Let’s walk through this decision tree step-by-step:Do you have labelled data?Even a handful of labeled samples can make a difference as to whichmethod works best
+ If you have no labeled data at all, you can start withthe zero-shot learning approach in SECTION X, which often sets astrong baseline to work from
+How many labels?If labeled data is available, the deciding factor is how much? If youhave a lot of training data available you can use the standard fine-tuningapproach discussed in Chapter 2
+Do you have unlabeled data?If you only have a handful of labeled samples it can immensely help ifyou have access to large amounts of unlabeled data
+ If you have accessto unlabeled data you can either use it to fine-tune the language modelon the domain before training a classifier or you can use moresophisticated methods such as Universal Data Augmentation (UDA)1 orUncertainty-Aware Self-Training (UST)2
+ If you also don’t have anyunlabeled data available it means that you cannot even annotate moredata if you wanted to
+ In this case you can use few-shot learning or usethe embeddings from a pretrained language model to perform look-upswith a nearest neighbor search
+In this chapter we’ll work our way through this decision tree by tackling acommon problem facing many support teams that use issue trackers likeJira or GitHub to assist their users: tagging issues with metadata based onthe issue’s description
+ These tags might define the issue type, the productcausing the problem, or which team is responsible for handling the reportedissue
+ Automating this process can have a big impact on productivity andenables the support teams to focus on helping their users
+ As a runningexample, we’ll use the GitHub issues associated with a popular open-sourceproject: Hugging Face Transformers! Let’s now take a look at whatinformation is contained in these issues, how to frame the task, and how toget the data
+NOTEThe methods presented in this chapter work well for text classification, but othertechniques such as data augmentation may be necessary for tackling more complex taskslike named entity recognition, question answering or summarization
+Building a GitHub Issues TaggerIf you navigate to the Issues tab of the Transformers repository, you’ll findissues like the one shown in Figure 7-2, which contains a title, description,and a set of tags or labels that characterize the issue
+ This suggests a naturalway to frame the supervised learning task: given a title and description ofan issue, predict one or more labels
+ Since each issue can be assigned avariable number of labels, this means we are dealing with a multilabel textclassification problem
+ This problem is usually more challenging than themulticlass setting that we encountered in Chapter 2, where each tweet wasassigned to only one emotion
+Figure 7-2
+ An typical GitHub issue on the Transformers repository
+Now that we’ve seen what the GitHub issues look like, let’s look at how wecan download them to create our dataset
+Getting the DataTo grab all the repository’s issues we’ll use the GitHub REST API to pollthe Issues endpoint
+ This endpoint returns a list of JSON objects, whereeach element contains a large number of fields about the issue including itsstate (open or closed), who opened the issue, as well as the title, body, andlabels we saw in Figure 7-2
+ To poll the endpoint, you can run the followingcurl command to download the first issue on the first page:Since it takes a while to fetch all the issues, we’ve included an issues
+jsonlfile in this book’s GitHub repository, along with a fetch_issuesfunction to download them yourself
+NOTEThe GitHub REST API treats pull requests as issues, so our dataset contains a mix ofboth
+ To keep things simple, we’ll develop our classifier for both types of issue,although in practice you might consider building two separate classifiers to have morefine-grained control over the model’s performance
+Preparing the DataOnce we’ve downloaded all the issues, we can load them using Pandas:import pandas asThere are almost 10,000 issues in our dataset and by looking at a single rowwe can see that the retrieved information from the GitHub API containsmany fields such as URLs, IDs, dates, users, title, body, as well as labels:The labels columns is the thing that we’re interested in, and each rowcontains a list of JSON objects with metadata about each label:For our purposes, we’re only interested in the name field of each labelobject, so let’s overwrite the labels column with just the label names:Next let’s take a look at the top-10 most frequent labels in the dataset
+ InPandas we can do this by “exploding” the labels column so that eachlabel in the list becomes a row, and then we simply count the occurrence ofeach label:We can see that there are 65 unique labels in the dataset and that the classesare very imbalanced, with wontfix and model card being the mostcommon labels
+ To make the classification problem more tractable, we’llfocus on building a tagger for a subset of the labels
+ For example, somelabels such as Good First Issue or Help Wanted are potentiallyvery difficult to predict from the issue’s description, while others such asthe model card could be classified with a simple rule that detects when amodel card is added on the Hugging Face Hub
+The following code shows the subset of labels that we’ll work with, alongwith a standardization of the names to make them easier to read:Now let’s look at the distribution of the new labels:tokenizationnew modelmodel trainingusagepipelinetensorflow or tfpytorchdocumentationexamplesSince multiple labels can be assigned to a single issue we can also look atthe distribution of label counts:The vast majority of the issues have no labels at all, and only a handfulhave more than one
+ Later in this chapter we’ll find it useful to treat theunlabeled issues as a separate training split, so let’s create a new columnthat indicates whether the issues is unlabeled or not:Let’s now take a look at an example:Google recently proposed a newIn this example a new model architecture is proposed, so the new modeltag makes sense
+ We can also see that the title contains information thatwill be useful for our classifier, so let’s concatenate it with the issue’sdescription in the body field:As we’ve done in other chapters, it a good idea to have a quick look at thenumber of words in our texts to see if we’ll lose much information duringthe tokenization step:The distribution has a characteristic long tail of many text datasets
+ Mosttexts are fairly short but there are also issues with more than 1,000 words
+ Itis common to have very long issues especially when error messages andcode snippets are posted along with it
+Creating Training SetsNow that we’ve explored and cleaned our dataset, the final thing to do isdefine our training sets to benchmark our classifiers
+We want to make sure that splits are balanced which is a bit trickier for amultlilabel problem because there is no guaranteed balance for all labels
+However, it can be approximated an although scikit-learn does not supportthis we can use the scitkit-multilearn library which is setup for multilabelproblems
+ The first thing we need to do is transform our set of labels likepytorch and tokenization into a format that the model can process
+Here we can use Scikit-Learn’s MultiLabelBinarizer transformerclass, which takes a list of label names and creates a vector with zeros forabsent labels and ones for present labels
+ We can test this by fittingMultiLabelBinarizer on all_labels to learn the mapping fromlabel name to ID as follows:In this simple example we can see the first row has two ones correspondingto the tokenization and new model labels, while the second row hasjust one hit with pytorch
+To create the splits we can use the iterative_train_test_splitfunction which creates the train/test splits iteratively to achieve balancedlabels
+ We wrap it in a function that we can apply to DataFrames
+ Sincethe function expects a two-dimensional feature matrix we need to add adimension to the possible indices before making the split:With that function in place we can split the data into supervised andunsupervised datasets and create balanced train, validation, and test sets forthe supervised part:Finally, let’s create a DatasetDict with all the splits so that we caneasily tokenize the dataset and integrate with the Trainer
+ Here we’ll usethe nifty Dataset
+from_pandas function from Datasets to load eachsplit directly from the corresponding Pandas DataFrame:This looks good, so the last thing to do is to create some training slices sothat we can evaluate the performance of each classifier as a function of thetraining set size
+Creating Training SlicesThe dataset has the two characteristics that we’d like to investigate in thischapter: sparse labeled data and mutlilabel classification
+ The training setconsists of only 220 examples to train with which is certainly a challengeeven with transfer learning
+ To drill-down into how each method in thischapter performs with little labelled data, we’ll also create slices of thetraining data with even fewer samples
+ We can then plot the number ofsamples against the performance and investigate various regimes
+ We’llstart with only 8 samples per label and build up until the slice covers thefull training set using the iterative_train_test_split function:Great, we’ve finally prepared our dataset into training splits - let’s next takea look at training a strong baseline model!Implementing a BayeslineWhenever you start a new NLP project, it’s always a good idea toimplement a set of strong baselines for two main reasons:1
+ A baseline based on regular expressions, hand-crafted rules, or avery simple model might already work really well to solve theproblem
+ In these cases, there is no reason to bring out big gunslike transformers which are generally more complex to deploy andmaintain in production environments
+2
+ The baselines provide sanity checks as you explore more complexmodels
+ For example, suppose you train BERT-large and get anaccuracy of 80% on your validation set
+ You might write it off as ahard dataset and call it a day
+ But what if you knew that a simpleclassifier like logistic regression gets 95% accuracy? That wouldraise your suspicion and prompt you to debug your model
+So let’s start our analysis by training a baseline model
+ For textclassification, a great baseline is a Naive Bayes classifier as it is verysimple, quick to train, and fairly robust to perturbations in the inputs
+ TheScikit-Learn implementation of Naive Bayes does not support multilabelclassification out-of-the-box, but fortunately we can again use the scitkitmultilearn library to cast the problem as a one-vs-rest classification taskwhere we train L binary classifiers for L labels
+ First, let’s use multilabelbinarizer to create a new label_ids column in our training sets
+ Here wecan use the Dataset
+map function to take care of all the processing inone go:To measure the performance of our classifiers, we’ll use the micro andmacro F -scores, where the former tracks performance on the frequentlabels and the latter on all labels disregarding the frequency
+ Since we’ll beevaluating each model across different sized training splits, let’s create adefaultdict with a list to store the scores per split:1Now we’re finally ready to train our baseline! Here’s the code to train themodel and evaluate our classifier across increasing training set sizes:There’s quite a lot going on in this block of code, so let’s unpack it
+ First,we get the training slice and encode the labels
+ Then we use a countvectorizer to encode the texts by simply creating a vector of the size of thevocabulary where each entry corresponds to the frequency a token appearedin the text
+ This is called a bag-of-word approach since all information onthe order of the words is lost
+ Then we train the classifier and use theprediction on the test set to get the micro and macro F -scores via theclassification report
+1With the following helper function we can plot the results of thisexperiment:Note that we plot the number of samples on a logarithmic scale
+ From thefigure we can see that the performance on the micro and macro F -scoresimproves as we increase the number of training samples, but more1dramatically with the micro scores, which approach to close to 50%accuracy with the full training set
+ With so few samples to train on, theresults are also slightly noisy since each slice can have a different classdistribution
+ Nevertheless, what’s important here is the trend, so let’s nowsee how these results fare against transformer-based approaches!Working With No Labeled DataThe first technique that we’ll consider is zero-shot classification, which issuitable in settings where you have no labeled data at all
+ This setting issuprisingly common in industry, and might occur because there is nohistoric data with labels or acquiring the labels for the data is difficult toget
+ We will cheat a bit in this section since we will still use the test data tomeasure the performance but we will not use any data to train the model
+Otherwise the comparison to the following approaches would be difficult
+Let’s now look at how zero-shot classification works
+Zero-Shot ClassificationThe goal of zero-shot classification is to make use of a pretrained modelwithout any additional fine-tuning on your task-specific corpus
+ To get abetter idea of how this could work, recall that language models like BERTare pretrained to predict masked tokens in text from thousands of books andlarge Wikipedia dumps
+ To successfully predict a missing token the modelneeds to be aware of the topic in the context
+ We can try to trick the modelinto classifying a document for us by providing a sentence like:“This section was about the topic [MASK]
+”The model should then give a reasonable suggestion for the document’stopic since this is a natural text to occur in the dataset
+3Let’s illustrate this further with the following toy problem: suppose youhave two children and one of them likes movies with cars while the otherenjoys movies with animals better
+ Unfortunately, they have already seen allthe ones you know so you want to build function that tells you what topic anew movie is about
+ Naturally you turn to transformers for this task, so thefirst thing to try loading BERT-base in the fill-mask pipeline whichuses the masked language model to predict the content of the maskedtokens:Next, let’s construct a little movie description and add a prompt to it with amasked word
+ The goal of the prompt is to guide the model to help us makea classification
+ The fill-mask pipeline returns the most likely tokens tofill in the masked spot:Clearly, the model predicts only tokens that are related to animals
+ We canalso turn this around and instead of getting the most likely tokens we canquery the pipeline for the probability of a few given tokens
+ For this task wemight choose cars and animals so we can pass them to the pipeline astargets:Unsurprisingly, the probability for the token cars is much smaller than foranimals
+ Let’s see if this also works for a description that is closer to cars:It worked! This is only a simple example and if we want to make sure itworks well we should test it thoroughly but it illustrates the key idea ofmany approaches discussed in this chapter: find a way to adapt a pretrainedmodel for another task without training it
+ In this case we setup a promptwith a mask in a way that we can use a masked language model directly forclassification
+ Let’s see if we can do better by adapting a model that hasbeen fine-tuned on a task that’s closer to text classification: naturallanguage inference or NLI for short
+Hijacking Natural Language InferenceUsing the masked language model for classification is a nice trick but wecan do better still by using a model that has been trained on a task that iscloser to classification
+ There is a neat proxy task called text entailment thatcan be used to train models for just this task
+ In text entailment, the modelneeds to determine whether two text passages are likely to follow orcontradict each other
+ With datasets such as the Multi-Genre NLI Corpus4 or its multilingual counterpart the Cross-Lingual NLI Corpus5 a model is trained to detect entailments and contraditions
+Each sample in these dataset is composed of three parts: a premise, ahypothesis, and a label where the label can be one of “entailment”,“neutral”, and “contradiction”
+ The “entailment” label is given when thehypothesis text is necessarily true under the premise
+ The “contradiction”label is used when the hypothesis is necessarily false or inappropriate underthe premise
+ If neither of these cases applies then the “neutral” label isassigned
+ See the figure Figure 7-3 for examples of the dataset
+Figure 7-3
+ Three examples from the MNLI dataset from three different domains
+ Image from MNLIpaper
+Now it turns our that we can hijack a model trained on the MNLI dataset tobuild a classifier without needing any labels at all! The key idea is to treatthe text we wish to classify as the premise, and then formulate thehypothesis as“This example is about {label}
+”where we insert the class name for the label
+ The entailment score then tellsus how likely that premise is about that topic, and we can run this for anynumber of classes sequentially
+ The downside of this is that we need toexecute a forward pass for each class which makes it less efficient than astandard classifier
+ Another slightly tricky aspect is that the choice of labelnames can have a large impact on the accuracy, and choosing labels withsemantic meaning is generally the best approach
+ For example if a label issimply called “Class 1”, the model has no hint what this might mean andwhether this constitutes a contradiction or entailment
+The Transformers library has an MNLI model for zero-shot classificationbuilt in
+ We can initialize it via the pipeline API as follows:The setting device=0 makes sure that the model runs on the GPU insteadof the default CPU to speed up inference
+ To classify a text we simply needto pass it to the pipeline along with the label names
+ In addition we can setmulti_label=True to ensure that all the scores are returned and notonly the maximum for single label classification: Not only> the title is exciting:> Pipelined NLP systems have largely been superseded by end-toend neural> modeling, yet nearly all commonly-used models still require anexplicit> tokenization step
+ While recent tokenization approaches basedon data-derived> subword lexicons are less brittle than manually engineeredtokenizers, these> techniques are not equally suited to all languages, and theuse of any fixed> vocabulary may limit a model's ability to adapt
+ In thispaper, we present> CANINE, a neural encoder that operates directly on charactersequences,> without explicit tokenization or vocabulary, and a pretraining strategy that> operates either directly on characters or optionally usessubwords as a soft> inductive bias
+ To use its finer-grained input effectively andefficiently,> CANINE combines downsampling, which reduces the input sequencelength, with a> deep transformer stack, which encodes context
+ CANINEoutperforms a> comparable mBERT model by 2
+8 F1 on TyDi QA, a challengingmultilingual> benchmark, despite having 28% fewer model parameters
+We heavily need this architecture in Transformers (RIP subwordtokenization)!The first author (Jonathan Clark) said on> > that the model and code will be released in April:partying_face: Open source statusNOTESince we are using a subword tokenizer we can even pass code to the model! Since thepretraining dataset for the zero-shot pipeline likely contains just a small fraction of codesnippets, the tokenization might not be very efficient but since the code is also made upof a lot of natural words this is not a big issue
+ Also, the code block might containimportant information such as the framework (PyTorch or TensorFlow)
+We can see that the model is very confident that this text is abouttokenization but it also produces relatively high scores for the other labels
+An important aspect for zero-shot classification is the domain we operatein
+ The texts we are dealing with which are very technical and mostly aboutcoding, which makes them quite different from the original text distributionin the MNLI dataset
+ Thus it is not surprising that this is a very challengingtask for the model
+ For some domains the model might work much betterthan others, depending on how close they are to the training data
+Let’s write a function that feeds a single example through the zero-shotpipeline, and then scale it out to the whole validation set by runningDataset
+map:Now that we have our scores, the next step is to determines which set oflabels should be assigned to each example
+ Here there are a few options wecan experiment with:Define a threshold and select all labels above the threshold
+Pick the top-k labels with the k highest scores
+To help us with determine which method is best, let’s write a get_predsfunction that applies one of the methods to retrieve the predictions:Next, let’s write a second function  that returns theArmed with these two functions, let’s start with the top-k method byincreasing k for several values and the plotting the micro and macro F scores across the validation set:From the plot we can see that the best results are obtained selecting thelabel with the highest score per example (top-1)
+ This is perhaps not sosurprising given that most of the examples in our datasets have only onelabel
+ Let’s now compare this against setting a threshold so we canpotentially predict more than one label per example:This approach fares somewhat worse than the top-1 results but we can seethe precision/recall trade-off clearly in this graph
+ If we choose thethreshold too small, then there are too many predictions which lead to a lowprecision
+ If we choose the threshold too high, then we will make hardly nopredictions which produces a low recall
+ From the plot we see that athreshold value of around 0
+8 finds the sweet spot between the two
+Since the top-1 method performs best, let’s use this to compare zero-shotclassification against Naive Bayes on the test set:Comparing the zero-shot pipeline to the baseline we observe two things:1
+ If we have less than 50 labeled samples, the zero-shot pipelinehandily outperforms the baseline
+2
+ Even above 50 samples, the performance of the zero-shot pipelineis superior when considering both the micro and macro F -scores
+The results for micro F -score tell us that the baseline performswell on the frequent class while the zero-shot pipeline excels atthose since it does not require any examples to learn from
+NOTEYou might notice a slight paradox in this section: although we talk about dealing with nolabels, we still use the validation and test set
+ We use them to show-case differenttechniques and to make the results comparable between them
+ Even in a real use cas,e itmakes sense to gather a handful of labeled examples to run some quick evaluations
+ Theimportant point is that we did not adapt the parameters of the model with the data;instead we just adapted some hyperparameters
+If you find it difficult to get good results on your own dataset, here’s a fewthings you can do to improve the zero-shot pipeline:The way the pipeline works makes it very sensitive to the names ofthe labels
+ If the names don’t make much sense or are not easilyconnected to the texts, the pipeline will likely perform poorly
+Either try using different names or use several names in paralleland aggregate them in an extra step
+Another thing you can improve is the form of the hypothesis
+ Bydefault it is “hypothesis=This is example is about \{}“, but you canpass any other text to the pipeline
+ Depending on the use-case thismight improve the performance as well
+Let’s now turn to the regime where we have a few labeled examples we canuse to train a model
+Working With A Few LabelsIn most NLP projects, you’ll have access to at least a few labelledexamples
+ The labels might come directly from a client or cross-companyteam, or you might decide to just sit down and annotate a few examplesyourself
+ Even for the previous approach we needed a few labelledexamples to evaluate how well the zero-shot approach works
+ In thissection, we’ll have a look at how we can best leverage the few, preciouslabelled examples that we have
+ Let’s start by looking at a technique knownas data augmentation which can help multiply the little labelled data that wehave
+Data AugmentationOne simple, but effective way to boost the performance of text classifierson small datasets is to apply data augmentation techniques to generate newtraining examples from the existing ones
+ This is a common strategy incomputer vision, where images are randomly perturbed without changingthe meaning of the data (e
+g
+ a slightly rotated cat is still a cat)
+ For text,data augmentation is somewhat trickier because perturbing the words orcharacters can completely change the meaning
+ For example, the twoquestions “Are elephants heavier than mice?” and “Are mice heavier thanelephants?” differ by a single word swap, but have opposite answers
+However, if the text consists of more than a few sentences (like our GitHubissues do), then the noise introduced by these types of transformations willgenerally preserve the meaning of the label
+ In practice, there are two typesof data augmentation techniques that are commonly used:Back translationTake a text in the source language, translate it into one or more targetlanguages using machine translation, and then translate back to thesource language
+ Back translation tends to works best for high-resourcelanguages or corpora that don’t contain too many domain-specificwords
+Token perturbationsGiven a text from the training set, randomly choose and perform simpletransformations like random synonym replacement, word insertion,swap, or deletion
+6An example of these transformations is shown in Table 7-1 and for adetailed list of other data augmentation techniques for NLP, we recommendreading A Visual Survey of Data Augmentation in NLP
+AugmentationNoneSentenceEven if you defeat me Megatron, others will rise to defeat your tyrannySynonym replaceEven if you kill me Megatron, others will prove to defeat your tyrannyRandom insertEven if you defeat me Megatron, others humanity will rise to defeat yourtyrannyRandom swapYou even if defeat me Megatron, others will rise defeat to tyranny yourRandom deleteEven if you me Megatron, others to defeat tyrannyBacktranslate(German)Even if you defeat me, others will rise up to defeat your tyrannyYou can implement back translation using machine translation models like while libraries like NlpAug and TextAttack provide variousrecipes for token perturbations
+ In this section, we’ll focus on usingsynonym replacement as it’s simple to implement and gets across the mainidea behind data augmentation
+We’ll use the ContextualWordEmbsAug augmenter from  toleverage the contextual word embeddings of DistilBERT for our synonymreplacements
+ Let’s start with a simple example:Here we can see how the word “are” has been replaced with “represent” togenerate a new synthetic training example
+ We can wrap this augmentationin a simple function as follows:Now when we call this function with Dataset
+map we can generate anynumber of new examples with the transformations_per_exampleargument
+ We can use this function in our code to train the Naive Bayesclassifier by simply adding one line after we select the slice:Including this and re-running the analysis produces the plot shown below
+From the figure we can see that a small amount of data augmentationimproves the performance of the Naive Bayes classifier by around 5 pointsin F score, and overtakes the zero-shot pipeline for the macro scores oncewe have around 150 training samples
+ Let’s now take a look at a methodbased on using the embeddings of large language models
+1Using Embeddings as a Lookup TableLarge language models such as GPT-3 have been shown to be excellent atsolving tasks with limited data
+ The reason is that these models learn usefulrepresentations of text that encode information across many dimensionssuch as sentiment, topic, text structure, and more
+ For this reason, theembeddings of large language models can be used to develop a semanticsearch engine, find similar documents or comments, or even classify text
+In this section we’ll create a text classifier that’s modeled after the OpenAIAPI classification endpoint
+ The idea follows a three step process:1
+ Use the language model to embed all labeled texts
+2
+ Perform a nearest neighbor search over the stored embeddings
+3
+ Aggregate the labels of the nearest neighbors to get a prediction
+The process is illustrated in Figure 7-4
+Figure 7-4
+ An illustration of how nearest neighbour embedding lookup works: All labelled data isembedded with a model and stored with the labels
+ When a new text needs to be classified it isembedded as well and the label is given based on the labels of the nearest neighbours
+ It is importantto calibrate the number of neighbours to be searched as too few might be noisy and too many mightmix in neighbouring groups
+The beauty of this approach is that no model fine-tuning is necessary toleverage the few available labelled data points
+ Instead the main decision tomake this approach work is to select an appropriate model that is ideallypretrained on a similar domain to your dataset
+Since GPT-3 it is only available through the OpenAI API, we’ll use GPT-2to test the technique
+ Specifically, we’ll use a variant of GPT-2 that wastrained on Python code, which will hopefully capture some of the contextcontained in our GitHub issues
+Let’s write a helper function that takes a list of texts and gets the vectorrepresentation using the model
+ We’ll take the last hidden state for eachtoken and then calculate the average over all hidden states that are notmasked:Now we can get the embeddings for each split
+ Note that GPT-style modelsdon’t have a padding token and therefore we need to add one before we canget the embeddings in a batched fashion as implemented above
+ We’ll justrecycle the end-of-string token for this purpose:text_embeddings = {}tokenizer
+pad_token = tokenizer
+eos_tokenfor split in ["train", "valid", "test"]:text_embeddings[split] = get_embeddings(ds[split]["text"])Now that we have all the embeddings we need to set up a system to searchthem
+ We could write a function that calculates say the cosine similiaritybetween a new text embedding that we’ll query and the existingembeddings in the train set
+ Alternatively, we can use a built-in structure ofthe Datasets library that is called a FAISS index
+ You can think of this as asearch engine for embeddings and we’ll have a closer look how it works ina minute
+ We can either use an existing field of the dataset to create aFAISS index with Dataset
+add_faiss_index or we can load newembeddings into the dataset withLet’s usethe latter function to add our train embeddings to the dataset as follows:This created a new FAISS index called embedding
+ We can now performa nearest neighbour lookup by calling the functionget_nearest_examples
+ It returns the closest neighbours as well asthe score matching score for each neighbour
+ We need to specify the queryembedding as well as the number of nearest neighbours to retrieve
+ Let’sgive it a spin and have a look at the documents that are closest to anexample:TEXT:Add new CANINE model New model addition Model descriptionGoogle recently proposed a new TEXT:Add Linformer model New model additionModel descriptionLinformer: Self-Attention with Linear ComplexityCharacterBERTCharacterBERT is a variant of BERt that uses aCharacterCNN module> instead of WordPieces
+ As a result, the model:1
+ Does no Nice! This is exactly what we hoped for: the three retrieved documents thatwe got via embedding lookup all have the same label and we can alreadyfrom the titles that they are all very similar
+ The question remains, however,what is the best value for k? Similarly, how we should then aggregate thelabels of the retrieved documents? Should we for example retrieve threedocuments and assign all labels that occurred at least twice? Or should wego for 20 and use all labels that appeared at least five times? Let’sinvestigate this systematically and try several values for k and then vary thethreshold m < k for label assignment with a helper function
+ We’ll recordthe macro and micro performance for each setting so we can decide laterwhich run performed best
+ Instead of looping over each sample in thevalidation set we can make use of the functionLet’s have check what the best values would be with all training samplesand visualize the scores for all k and m configurations:From the plots we can see that the performance is best when we choosek = 7 and m = 3
+ In other words, when we retrieve the 7 nearest neighborsand then assign the labels that occurred at least three times
+ Now that wehave a good method for finding the best values for the embedding lookupwe can play the same game as with the Naive Bayes classifier where we gothrough the slices of the training set and evaluate the performance
+ Beforewe can slice the dataset we need to remove the index since we cannot slicea FAISS index like the dataset
+ The rest of the loops stays exactly the samewith the addition of using the validation set to get the best k and m values:These results look promising: the embedding lookup beats the Naive Bayesbaseline with 16 samples in the training set
+ Although we don’t manage tobeat the zero-shot pipeline on the macro scores until around 64 examples
+That means for this use-case if you have fewer than 64 samples it makessense to give the zero-shot pipeline a shot and if you have more samplesyou could give an embedding lookup a shot
+ If it is more important toperform well on all classes equally you might be better off with the zeroshot pipeline until you have more than 64 labels
+Take these results with a grain of salt; which method works best stronglydepends on the domain
+ The zero-shot pipeline’s training data is quitedifferent from the GitHub issues we’re using it on which contains a lot ofcode which the model likely has not encountered much before
+ For a morecommon task such as sentiment analysis of reviews the pipeline might workmuch better
+ Similarly, the embeddings’ quality depends on the model anddata it was trained on
+ We tried half a dozen models such as 'sentencetransformers/stsb-roberta-large' which was trained to givehigh quality embeddings of sentences, and 'microsoft/codebertbase' as well as 'dbernsohn/roberta-python' which weretrained on code and documentation
+ For this specific use-case GPT-2trained on Python code worked best
+Since you don’t actually need to change anything in your code besidesreplacing the model checkpoint name to test another model you can quicklytry out a few models once you have the evaluation pipeline setup
+ Beforewe continue the quest of finding the best approach in the sparse labeldomain we want to take a moment to spotlight the FAISS library
+Efficient Similarity Search With FAISSWe first encountered FAISS in Chapter 4 where we used it to retrievedocuments via the DPR embeddings
+ Here we’ll explain briefly how theFAISS library works and why it is a powerful tool in the ML toolbox
+We are used to performing fast text queries on huge datasets such asWikipedia or the web with search engines such as Google
+ When we movefrom text to embeddings we would like to maintain that performance;however, the methods used to speed up text queries don’t apply toembeddings
+To speed up text search we usually create an inverted index that maps termsto documents
+ An inverted index works like an index at the end of a book:each word is mapped to the pages (or in our case document) it occurs in
+When we later run a query we can quickly look up in which documents thesearch terms appear
+ This works well with discrete objects such as wordsbut does not work with continuous objects such as vectors
+ Each documenthas likely a unique vector and therefore the index would never match with anew vector
+ Instead of looking for exact matches we need to look for closeor similar matches
+When we want to find the most similar vectors in a database to a queryvector in theory we would need to compare the query vector to each vectorin the database
+ For a small database such as we have in this chapter this isno problem but when we scale this up to thousands or even million ofentries we would need to wait for a while until a query is processed
+FAISS addresses this issues with several tricks
+ The main idea is to partitionthe dataset
+ If we only need to compare the query vector to a subset of thedatabase we can speed up the process significantly
+ But if we just randomlypartition the dataset how could we decide which partition to search andwhat guarantees do we get for finding the most similar entries
+ Evidently,there needs to be a better solution: apply k-means clustering to the dataset!This clusters the embeddings into groups by similarity
+ Furthermore, foreach group we get a centroid vector which is the average of all members ofthe group
+Figure 7-5
+ This figure depicts the structure of a FAISS index
+ The grey points represent data pointsadded to the index and the bold black points are the cluster centeres found via k-means clustering
+The colored areas represent the regions belonging to a cluster center
+Given such a grouping, search is much easier: we first search across thecentroids for the one that is most similar to our query and then we searchwithin the group
+ This reduces the number of comparisons from n to kwhere n is the number of vectors in the database and k the number ofclusters
+ So the question is what is the best option for k? If it is too small,each group still contains many samples we need to compare against in thefirst step and if k is too large there are many centroids we need to searchthrough
+ Looking for the minimum of the function k + with respect to kwe find k = n
+ In fact we can visualize this with the following graphic:In the plot you can see the number of comparisons as a function of thenumber of clusters
+ We are looking for the minimum of this function wherewe need to do the least comparisons
+ We can see that the minimum isexactly where we expected to see at 2 = 2 = 1024
+In addition to speeding up queries with partitioning, FAISS also allows youto utilize GPUs for further speedup
+ If memory becomes a concern there arealso several options to compress the vectors with advanced quantizationschemes
+ If you want to use FAISS for your project the repository has asimple guide for you to choose the right methods for your use-case
+One of the largest projects to use FAISS was the creation of the CCMatrixcorpus by Facebook
+ They used multilingual embeddings to find parallelsentences in different languages
+ This enormous corpus was subsequentlyused to train M2M-100, a large machine translation model that is able todirectly translate between any of 100 languages
+That was a little detour through the FAISS library
+ Let’s get back toclassification now and have a stab at fine-tuning a transformer on a fewlabelled examples
+Fine-tuning a Vanilla TransformerIf we have access to labeled data we can also try to do the obvious thing:simply fine-tune a pretrained transformer model
+ We can either use astandard checkpoint such as bert-base-uncased or we can also try acheckpoint of a model that has been specifically tuned on a domain closerto ours such as  that has been trained on discussions on Stack Overflow
+ Ingeneral, it can make a lot of sense to use a model that is closer to yourdomain and there are over 10,000 models available on the Hugging Facehub
+ In our case, however, we found that the standard BERT checkpointworked best
+Let’s start by loading the pretrained tokenizer and tokenize our dataset andget rid of the columns we don’t need for training and evaluation:One thing that is special about our use-case is the multilabel classificationaspect
+ The models and Trainer don’t support this out of the box but theTrainer can be easily modified for the task
+ Part of the Trainer’straining loop is the call to the compute_loss function which returns theloss
+ By subclassing the Trainer and overwriting the compute_lossfunction we can adapt the loss to the multilabel case
+ Instead of calculatingthe cross-entropy loss across all labels we calculate it for each output classseparately
+ We can do this by using theSince we are likely to quickly overfit the training data due to its limited sizewe set the load_best_model_at_end=True and choose the bestmodel based on the micro F1-score
+Since we need the F1-score to choose the best model we need to make sureit is calculated during the evaluation
+ Since the model returns the logits wefirst need to normalize the predictions with a sigmoid function and can thenbinarize them with a simple threshold
+ Then we return the scores we areinterested in from the classification report:from scipy
+special import expit as sigmoidNow we are ready to rumble! For each training set slice we train a classifierfrom scratch, load the best model at the end of the training loop and storethe results on the test set:First of all we see that simply fine-tuning a vanilla BERT model on thedataset leads to competitive results when we have access to around 64examples
+ We also see that before the behavior is a bit erratic which is againdue training a model on a small sample where some labels can beunfavorably unbalanced
+ Before we make use of the unlabeled part of ourdataset let’s take a quick look at another promising approach for usinglanguage models in the few-shot domain
+In-context and Few-shot Learning with PromptsWe’ve seen in the zero-shot classification section that we can use alanguage model like BERT or GPT-2 and adapt it to a supervised task byusing prompts and parsing the model’s token predictions
+ This is differentfrom the classical approach of adding a task specific head and tuning themodel parameters for the task
+ On the plus side this approach does notrequire any training data but on the negative side it seems we can’t levaragelabeled data if we have access to it
+ There is a middle ground sometimescalled in-context or few-shot learning
+To illustrate the concept, consider a English to French translation task
+ Inthe zero-shot paradigm we would construct a prompt that might look asfollows:This hopefully prompts the model to predict the tokens of the word “merci”
+The clearer the task the better this approach works
+ An interesting findingof the GPT-3 paper7 was the ability of the model to effectively learn fromexamples presented in the prompt
+ What OpenAI found is that you canimprove the results by adding examples of the task to the prompt asillustrated in figure Figure 7-6
+Figure 7-6
+ This figure illustrate how GPT-3 can utilize examples of the task provieded in the context
+Such sequences of examples can occur naturally in the pretraining corpus and thus the model learnsto interpret such sequences to better predict the next token
+ Image from Language Models are FewShot Learners by T
+ Brown et al (2020)
+Furthermore, they found that the larger the models are scaled the better theyare at using the in-context examples leading to significant performanceboosts
+ Although GPT-3 sized models are challenging to use in production,this is an exciting emerging research field and people have built coolapplications such as a natural language shell where commands are enteredin natural language and parsed by GPT-3 to shell commands
+An alternative approach to use labeled data is to create examples of theprompts and desired predictions and continue training the language modelon these examples
+ A novel method called ADAPET8 uses such anapproach and beats GPT-3 on a wide variety of task tuning the model withgenerated prompts
+ Recent work by Hugging Face researchers9 suggeststhat such an approach can be more data efficient than fine-tuning a customhead
+In this section we looked at various ways to make good use of the fewlabelled examples that we have
+ Very often we also have access to a lot ofunlabelled data in addition to the labelled examples and in the next sectionwe have a look at how to make good use of it
+Levaraging Unlabelled DataAlthough large volumes of high-quality labeled data is the best casescenario to train a classifier, this does not mean that unlabeled data isworthless
+ Just think about the pretraining of most models we have used:even though they are trained on mostly unrelated data from the internet, wecan leverage the pretrained weights for other tasks on wide variety of texts
+This is the core idea of transfer learning in NLP
+ Naturally, if thedownstream tasks has similar textual structure as the pretraining texts thetransfer works better
+ So if we can bring the pretraining task closer to thedownstream objective we could potentially improve the transfer
+Let’s think about this in terms of our concrete use-case: BERT is pretrainedon the Book Corpus and English Wikipedia so texts containing code andGitHub issues are definitely a small niche in these dataset
+ If we pretrainedBERT from scratch we could do it on a crawl of all of the issues on GitHubfor example
+ However, this would be expensive and a lot of aspects aboutlanguage that BERT learned are still valid for GitHub issues
+ So is there amiddle-ground between retraining from scratch and just use the model as isfor classification? There is and it is called domain adaptation
+ Instead ofretraining the language model from scratch we can continue training it ondata from our domain
+ In this step we use the classical language modelobjective of predicting masked words which means we don’t need anylabeled data for this step
+ After that we can then load the adapted model as aclassifier and fine-tune it, thus leveraging the unlabeled data
+The beauty of domain adaptation is that compared to labeled data,unlabeled data is often abundantly available
+ Furthermore, the adaptedmodel can be reused for many use-cases
+ Imagine you want to build anemail classifier and apply domain adaptation on all your historic emails
+You can later use the same model for named entity recognition or anotherclassification task like sentiment analysis, since the approach is agnostic tothe downstream task
+Fine-tuning a Language ModelIn this section we’ll fine-tune the pretrained BERT model with maskedlanguage modeling on the unlabeled portion of the dataset
+ To do this weonly need two new concepts: an extra step when tokenizing the data and aspecial data collator
+ Let’s start with the tokenization
+In addition to the ordinary tokens from the text the tokenizer also addsspecial tokens to the sequence such as the [CLS] and the [SEP] token whichare used for classification and next sentence prediction
+ When we domasked language model we want to make sure we don’t train the model toalso predict these tokens
+ For this reason we mask them from the loss andwe can get a mask when tokenizing by settingreturn_special_tokens_mask=True
+ Let’s re-tokenize the textwith that setting:from transformers import What’s missing to start with masked language modeling is the mechanismto mask tokens in the input sequence and have the target tokens in theoutputs
+ One way we could approach this is by setting up a function thatmasks random tokens and creates labels for these sequences
+ On the onehand this would double the size of the dataset since we would also store thetarget sequence in the dataset and on the other hand we would use the samemasking of a sequence every epoch
+A much more elegant solution to this is the use of a a data collator
+Remember that the data collator is the function that builds the bridgebetween the dataset and the model calls
+ A batch is sampled from thedataset and the data collator prepares the elements in the batch to feed themto the model
+ In the simplest case we have encountered it simplyconcatenates the tensors of each element into a a single tensor
+ In our casewe can use it to do the masking and label generation on the fly
+ That waywe don’t need to store it and we get new masks everytime we sample
+ Thedata collator for this task is calledDataCollatorForLanguageModeling and we initialize it with themodel’s tokenizer and the fraction of tokens we want to masked calledmlm_probability
+ We use this collator to mask 15% of the tokenswhich follows the procedure in the original BERT paper:With the tokenizer and data collator in place we are ready to fine-tune themasked language model
+ We chose the batch size to make most use of theGPUs, but you may want to reduce it if you run into out-of-memory errors:We can access the trainer’s log history to look at the training and validationlosses of the model
+ All logs are stored intrainer
+state
+log_history as a list of dictionaries which we caneasily load into a Pandas DataFrame
+ Since the validation is notperformed in sync with the normal loss calculation there are missing valuesin the dataframe
+ For this reason we drop the missing values before plottingthe metrics:import pandas as pdIt seems that both the training and validation loss went down considerably
+So let’s check if we can also see an improvement when we fine-tune aclassifier based on this model
+Fine-tuning a ClassifierNow we repeat the fine-tuning procedure with the slight difference that weload our own, custom checkpoint:Comparing the results to the fine-tuning based on vanilla BERT we see thatwe get an advantage especially in the low data domain but also when wehave access to more labels we get at least a few percent gain:This highlights that domain adaptation can improve the model performancewith unlabeled data and little effort
+ Naturally the more unlabeled data andthe fewer labeled data you have the more impact you will get with thismethod
+ Before we conclude this chapter we want to show two methodshow you can leverage the unlabeled data even further with a few tricks
+Advanced MethodsFine-tuning the language model before tuning it is a nice method since it isstraightforward and yields reliable performance boosts
+ However, there area few more sophisticated methods than can leverage unlabeled data evenfurther
+ Showcasing these methods is beyond the scope of this book but wesummarize them here which should give a good starting point should youneed more performance
+Universal Data AugmentationThe first method is called universal data augmentation (UDA) and describesan approach to use unlabeled data that is not only limited to text
+ The idea isthat a model’s predictions should be consistent even if the input is slightlydistorted
+ Such distortions are introduced with standard data augmentationstrategies: rotations and random noise for images and token replacementsand back-translations with text
+ We can enforce consistency by creating aloss term based on the KL-divergence between the predictions of theoriginal and distorted input
+The interesting aspect is that we can enforce the consistency on theunlabeled data and even though we don’t know what the correct predictionis we minimize the KL-divergence between the predictions
+ So on the onehand we train the labeled data with the standard supervised approach and onthe other hand we introduce a second training loops where we train themodel to make consistent predictions on the unlabeled data as outlined infigure Figure 7-7
+Figure 7-7
+ With UDA the classical cross-entropy loss from the labelled samples is augmented withthe consistency loss from unlabelled samples
+ Image from the UDA paper
+The performance of this approach with a handful of labels gets close to theperformance with thousands of examples
+ The downside is that you firstneed an data augmentation pipeline and then training takes much longersince you also train on the unlabeled fraction of your dataset
+Uncertainty-Aware Self-TrainingAnother, promising method to leverage unlabeled data is Uncertainty-awareSelf-training (UST)
+ The idea is to train a teacher model on the labeled dataand then use that model to create pseudo-labels on the unlabeled data
+ Thena student is trained on the pseudo-labeled data and after training becomesthe teacher for the next iteration
+One interesting aspect of this method is how the pseudo-labels aregenerated: to get an uncertainty measure of the model’s predictions thesame input is fed several times through the model with dropout turned on
+Then the variance in the predictions give a proxy for the certainty of themodel on a specific sample
+ With that uncertainty measure the pseudo-labels are then sampled using a method called Bayesian Active Learning byDisagreement (BALD)
+ The full training pipeline is illustrated in Figure 78
+Figure 7-8
+ The UST method consists of a teacher that generated pseudo labels and a student that issubsequently trained on those labels
+ After the student is trained it becomes the teacher and the stepis repeated
+ Image from the UST paper
+With this iteration scheme the teacher continuously gets better at creatingpseudo-labels and thus the model improves performance
+ In the end thisapproach also gets within a few percent of model’s trained on the fulltraining data with thousands of samples and even beats UDA on severaldatasets
+ This concludes the this section on leveraging unlabeled data andwe now turn to the conclusion
+ConclusionIn this chapter we’ve seen that even if we have only a few or even no labelsthat not all hope is lost
+ We can utilize models that have been pretrained onother tasks such as the BERT language model or GPT-2 trained on Pythoncode to make predictions on the new task of GitHub issue classification
+Furthermore, we can use domain adaptation to get an additional boost whentraining the model with a normal classification head
+Which of the presented approaches work best on a specific use-case dependon a variety of aspects: how much labeled data do you have, how noisy is it,how close is the data to the pretraining corpus and so on
+ To find out whatworks best it is a good idea to setup an evaluation pipeline and then iteratequickly
+ The flexible transformer library API allows you to quickly load ahandful of models and compare them without the need for any codechanges
+ There are over 10,000 on the model hub and chances aresomebody worked on a similar problem in a past and you can build on topof this
+One aspect that is beyond this book is the trade-off between a morecomplex approach like UDA or UST and getting more data
+ To evaluateyour approach it makes sense to at least build a validation and test set earlyon
+ At every step of the way you can also gather more labeled data
+ Usuallyannotating a few hundred examples is a matter of a couple hours or a fewdays and there are many tools that assist you doing so
+ Depending on whatyou are trying to achieve it can make sense to invest some time creating asmall high quality dataset over engineering a very complex method tocompensate for the lack thereof
+ With the the methods we presented in thisnotebook you can ensure that you get the most value out of your preciouslabeled data
+All the tasks that we’ve seen so far in this book fall in the domain of naturallanguage understanding (NLU), where we have a text as an input and use itto make a some sort of classification
+ For example, in text classification wepredicted a single class for an input sequence, while in NER we predicted aclass for each token
+ In question-answering we classified each token as astart or end token of the answer span
+ We now turn from NLU tasks tonatural language generation (NLG) tasks, where both the input and theoutput consist of text
+ In the next chapter we explore how to train modelsfor summarization where the input is a long texts and the output is a shorttext with its summary

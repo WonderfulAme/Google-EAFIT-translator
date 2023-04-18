@@ -1,0 +1,196 @@
+Chapter 8
+ Text GenerationA NOTE FOR EARLY RELEASE READERSWith Early Release ebooks, you get books in their earliest form—the author’s raw andunedited content as they write—so you can take advantage of these technologies longbefore the official release of these titles
+This will be the 8th chapter of the final book
+ Please note that the GitHub repo will bemade active later on
+If you have comments about how we might improve the content and/or examples in thisbook, or if you notice missing material within this chapter, please reach out to the editor atmpotter@oreilly
+com
+One of the most uncanny features of Transformer-based language models is their ability togenerate text that is almost indistinguishable from human-written text
+ A famous example isOpenAI’s GPT-2,1 which when given the prompt:In a shocking finding, scientist discovered a herd of unicorns living in a remote, previouslyunexplored valley, in the Andes Mountains
+ Even more surprising to the researchers was thefact that the unicorns spoke perfect English
+was able to generate a compelling news article about talking unicorns:The scientist named the population, after their distinctive horn, Ovid’s Unicorn
+ These fourhorned, silver-white unicorns were previously unknown to science
+ Now, after almost two centuries, the mystery of what sparked this odd phenomenon is finally solved
+ Dr
+ Jorge Pérez, an evolutionary biologist from the University of La Paz, and several companions,were exploring the Andes Mountains when they found a small valley, with no other animalsor humans
+ Pérez noticed that the valley had what appeared to be a natural fountain,surrounded by two peaks of rock and silver snow
+ Pérez and the others then ventured furtherinto the valley
+ “By the time we reached the top of one peak, the water looked blue, withsome crystals on top,” said Pérez
+ Pérez and his friends were astonished to see the unicornherd
+ These creatures could be seen from the air without having to move too much to seethem - they were so close they could touch their horns
+ While examining these bizarrecreatures the scientists discovered that the creatures also spoke some fairly regular English…What makes this example so remarkable is that it was generated without any explicitsupervision! By simply learning to predict the next word in millions of webpages, GPT-2 andits more powerful descendants like GPT-32 are able to acquire a broad set of skills and patternrecognition abilities that can be activated with different kinds of input prompts
+ Figure 8-1shows how language models are sometimes exposed to sequences of sub-tasks like addition,unscrambling words, and translation during pretraining, which allows them to transfer thisknowledge effectively during fine-tuning or (if the model is large enough) inference time
+These sub-tasks are not chosen ahead of time, but occur naturally in the huge corpora used totrain billion-parameter language models
+Figure 8-1
+ During pretraining, language models are exposed to sequences of sub-tasks that can be adapted to during inference(courtesy of Tom B
+ Brown)
+This ability of Transformers to generate realistic text has produced a diverse range ofapplications like Talk To Transformer, Write With Transformer, AI Dungeon, andconversational agents like Google’s Meena that can even tell corny jokes (Figure 8-2)!Figure 8-2
+ Meena (left) telling a corny joke to a human (right) (courtesy of Daniel Adiwardana and Thang Luong)In this chapter we’ll use GPT-2 to illustrate how text generation works for language models andexplore how a recent class of Transformer architectures can be applied to one of the mostchallenging tasks in NLP: generating accurate summaries from long text documents like newsarticles or business reports
+The Challenge With Generating Coherent TextIn this book, we have focused on tackling NLP tasks via a combination of pretraining andsupervised fine-tuning
+ For task-specific heads like sequence or token classification, generatingpredictions was fairly straightforward; the model produced some logits and we either took themaximum value to get the predicted class, or applied a softmax function to obtain the predictedprobabilities per class
+ By contrast, converting the model’s probabilistic output to text requiresa decoding method which introduces a few challenges that are unique to text generation:The decoding is done iteratively and thus involves significantly more compute thansimply passing inputs once through the forward pass of a model
+The quality and diversity of the generated text depends on the choice of decodingmethod and associated hyperparameters
+To understand how this decoding process works, let’s start by examining how GPT-2 ispretrained and subsequently applied to generate text
+Like other autoregressive or causal language models, GPT-2 is pretrained to estimate theprobability P (y , y , 
+
+
+, y |x) of a sequence of tokens y , y , 
+
+
+y occurring in the text, givensome initial prompt or context sequence x
+ Since it is impractical to acquire enough trainingdata to estimate P (y|x) directly, it is common to use the chain rule of probability to factorize itas a product of conditional probabilitieswhere y is a shorthand notation for the sequence y , 
+
+
+, y 
+ It is from these conditionalprobabilities that we pick up the intuition that autoregressive language modeling amounts topredicting each word given the preceding words in a sentence; this is exactly what theprobability on the right-hand side of the preceding equation describes
+ Notice that thispretraining objective is quite different to BERT’s, which utilizes both past and future contextsto predict a masked token
+ As shown in Figure 8-3, to prevent the attention heads from peekingat future tokens, GPT-2 applies a mask to the input sentence so that tokens to the right of thecurrent position are hidden
+Figure 8-3
+ Difference between the self-attention mechanisms of BERT (left) and GPT-2 (right) for three token embeddings
+ Inthe BERT case, each token embedding can attend to all other embeddings
+ In the GPT-2 case, token embeddings can onlyattend to previous embeddings in the sequence
+By now you may have guessed how we can adapt this next-token prediction task to generatetext sequences of arbitrary length
+ As shown in Figure 8-4, we start with a prompt like“Transformers are the” and use the model to predict the next token
+ Once we have determinedthe next token, we append it to the prompt and then use the new input sequence to generateanother token
+ We do this until we have reached a special end of sequence (EOS) token or apredefined maximum length
+Figure 8-4
+ Generating text from an input sequence by adding a new word to the input at each step
+NOTESince the output sequence is conditioned on the choice of input prompt, this type of text generation is often calledconditional text generation
+At the heart of this process lies a decoding method that determines which token is selected ateach timestep
+ Since the language model head produces a logit z per token in the vocabularyat each step, we can get the probability distribution over the next possible token w by takingthe softmax:The goal of most decoding methods is to search for the most likely overall sequence by pickinga ŷ such thatSince there does not exist an algorithm that can find the optimal decoded sequence inpolynomial time, we rely on approximations instead
+ In this section we’ll explore a few of theseapproximations and gradually build up towards smarter and more complex algorithms that canbe used to generate high quality texts
+Greedy Search DecodingThe simplest decoding method to get discrete tokens from a model’s continuous output is togreedily select the token with the highest probability at each timestep:To see how greedy search works, let’s start by loading the 1
+5 billion-parameter version ofGPT-2 with a language modeling head:Now let’s generate some text! Although Transformers provides a generate function forautoregressive models like GPT-2, let’s implement this decoding method ourselves to see whatgoes on under the hood
+ To warm up, we’ll take the same iterative approach shown in Figure 84 and use “Transformers are the” as the input prompt and run the decoding for eight timesteps
+At each timestep, we pick out the model’s logits for the last token in the prompt and wrap themwith a softmax to get a probability distribution
+ We then pick the next token with the highestprobability, add it to the input sequence and run the process again
+ The following code does thejob, and also stores the five most probable tokens at each timestep so we can visualize thealternatives:InputChoice 1Choice 2Choice 3Choice 4Choice 5Transformers arethemost only best Transformersultimate Transformers arethe mostpopularpowerful common famous successful Transformers arethe most populartoy toys Transformersof andTransformers arethe most populartoyline inof brandlineTransformers arethe most populartoy linein of on everTransformers arethe most populartoy line inthehistoryAmericaJapan NorthTransformers arethe most populartoy line in theworldUnitedhistoryUS U Transformers arethe most populartoy line in theworldand with today With this simple method we were able to generate the perfectly reasonable sentence“Transformers are the most popular toy line in the world” from the input prompt
+ We can alsosee explicitly the iterative nature of text generation; unlike other tasks such as sequenceclassification or question answering where a single forward pass suffices to generate thepredictions, with text generation we need to decode the output tokens one at a time
+Implementing greedy search wasn’t too hard, but we’ll we want to use the in-built generatefunction from Transformers to explore more sophisticated decoding methods
+ To reproduce oursimple example, let’s make sure sampling is switched off (it’s off by default, unless the specificconfiguration of the model you are loading the checkpoint from states otherwise) and specifythe max_length to eleven tokens since our prompt already has three words:Now let’s try something a bit more interesting: can we reproduce the unicorn story fromOpenAI? As we did above, we’ll encode the prompt with the tokenizer and specify a largervalue for max_length to generate a longer sequence of text:a shocking finding, scientist discovered a herd of unicorns living in aremote, previously unexplored valley, in the Andes Mountains
+ Even moresurprising to the researchers was the fact that the unicorns spoke perfectEnglish
+The researchers, from the University of California, Davis, and the University of> Colorado, Boulder, were conducting a study on the Andean cloud forest, which> is home to the rare species of cloud forest trees
+The researchers were surprised to find that the unicorns were able to> communicate with each other, and even with humans
+The researchers were surprised to find that the unicorns were ableWell, the first few sentences are quite different from the OpenAI example and amusinglyinvolve a different universities being credited with the discovery! We can also see one of themain drawbacks with greedy search decoding: it tends to produce repetitive output sequences,which is certainly undesirable in a news article
+ This is a common problem with greedy searchalgorithms which can fail to give you the optimal solution; in the context of decoding, it canmiss word sequences whose overall probability is higher just because high probability wordshappen to be preceded by low probability ones
+Fortunately, we can do better - let’s examine a popular method known as beam searchdecoding
+NOTEAlthough greedy search decoding is rarely used for text generation tasks that require diversity, it can be useful forproducing short sequences like arithmetic where a deterministic and factually correct output is preferred
+3 Forthese tasks, you can condition GPT-2 by providing a few line-separated examples in the format "" as the input prompt
+Beam Search DecodingInstead of decoding the token with the highest probability at each step, beam search keeps trackof the top-b most probable next-tokens, where b is referred to as the number of beams or partialhypotheses
+ The next set of beams are chosen by considering all possible next-token extensionsof the existing set and selecting the b most likely extensions
+ The process is repeated until wereach the maximum length or an EOS token, and the most likely sequence is selected byranking the b beams according to their log-probabilities
+ An example of beam search isrepresented in Figure 8-5
+Figure 8-5
+ Beam search with 2 beams
+ The most probable sequences at each timestep are highlighted in blue
+Why do we score the sequences using log-probabilities instead of the probabilities themselves?One reason is that calculating the overall probability of a sequence P (y , y , 
+
+
+, y |x) involvescalculating a product of conditional probabilities P (y |y , x)
+ Since each conditionalprobability is typically a small number in the range [0, 1], their product can lead to an overallprobability that can easily underflow
+ For example, suppose we have a sequence of t = 1024tokens and generously assume that the probability for each token is 0
+5
+ The overall probabilityfor this sequence is an extremely small numberwhich leads to numerical instability as we run into underflow
+ We can avoid this by calculatinga related term: the log-probability
+ If we apply the logarithm to the joint and conditionalprobabilities, then with the help of the product rule for logarithms we get:In other words, the product of probabilities on the right-hand side of the equation becomes asum of log-probabilities
+ The log-probabilities have larger absolute values, and therefore we geta larger absolute value in total
+ For example, calculating the log-probability of the sameexample as before givesThis is a number we can easily deal with and this approach still works for much smallernumbers
+ Since we only want to compare relative probabilities we can do this directly with logprobabilities
+Let’s calculate and compare the log-probabilities of the text generated by greedy and beamsearch to see if beam search can improve the overall probability
+ Since Transformer modelsreturn the unnormalized logits for the next token given the input tokens, we first need tonormalize the logits to create a probability distribution over the whole vocabulary for eachtoken in the sequence
+ We then need to select only the token probabilities that were present inthe sequence
+ The following function implements these steps:This gives us the log-probability for a single token, so to get the total log-probability of asequence we just need to sum the log-probabilities for each token:Note, that we ignore the log-probabilities of the input sequence since they were not generatedby the model
+ We can also see that it is important to align the logits and the labels; since themodel predicts the next-token, we do not get a logit for the first label and we don’t need the lastlogit since we don’t have a ground truth token for it
+Let’s use these functions to first calculate the sequence log-probability of the greedy decoder onthe OpenAI prompt:a shocking finding, scientist discovered a herd of unicorns living in aremote, previously unexplored valley, in the Andes Mountains
+ Even moresurprising to the researchers was the fact that the unicorns spoke perfectEnglish
+The researchers, from the University of California, Davis, and the University of> Colorado, Boulder, were conducting a study on the Andean cloud forest, which> is home to the rare species of cloud forest trees
+The researchers were surprised to find that the unicorns were able to> communicate with each other, and even with humans
+The researchers were surprised to find that the unicorns were ableNow let’s compare this to a sequence that is generated with beam search
+ To activate beamsearch with the generate function we just need to specify the number of beams with thenum_beams parameter
+ The more beams we choose the better the result potentially gets,however the generation process becomes much slower since we generate parallel sequences foreach beam:a shocking finding, scientist discovered a herd of unicorns living in aremote, previously unexplored valley, in the Andes Mountains
+ Even moresurprising to the researchers was the fact that the unicorns spoke perfectEnglish
+The discovery of the unicorns was made by a team of scientists from the> University of California, Santa Cruz, and the National Geographic Society
+The scientists were conducting a study of the Andes Mountains when they> discovered a herd of unicorns living in a remote, previously unexplored> valley, in the Andes Mountains
+ Even more surprising to the researchers was> the fact that the unicorns spoke perfect EnglishWe can see that we get a better log-probability (higher is better) with beam search than we didwith simple greedy decoding
+ However we can see that beam search also suffers from repetitivetext
+ One way to address this is to impose an n-gram penalty with theno_repeat_ngram_size parameter that tracks which n-grams have been seen and sets thenext-token probability to zero if it would produce a previously seen n-gram:a shocking finding, scientist discovered a herd of unicorns living in aremote, previously unexplored valley, in the Andes Mountains
+ Even moresurprising to the researchers was the fact that the unicorns spoke perfectEnglish
+The discovery was made by a team of scientists from the University of> California, Santa Cruz, and the National Geographic Society
+According to a press release, the scientists were conducting a survey of the> area when they came across the herd
+ They were surprised to find that they> were able to converse with the animals in English, even though they had never> seen a unicorn in person before
+ The researchers wereThis is not too bad! We’ve managed to stop the repetitions and we can see that despiteproducing a lower score, the text remains coherent
+ Beam search with n-gram penalty is a goodway to find a trade-off between focusing on high-probability tokens (with beam search) whilereducing repetitions (with n-gram penalty), and is commonly used in applications such assummarization or machine-translation where factual correctness is important
+ When factualcorrectness is less important than the diversity of generated output, for instance in open-domainchitchat or story generation, another alternative to reduce repetitions while improving diversityis to use sampling instead of greedy decoding/beam search
+Let’s thus round out our exploration of text generation by examining a few of the most commonsampling methods
+Sampling MethodsThe simplest sampling method is to randomly sample from the model output’s probabilitydistribution over the full vocabulary at each timestep:where |V | denotes the cardinality of the vocabulary
+ We can easily control the diversity of theoutput by adding a temperature parameter T that rescales the logits before taking the softmax:With temperature we can control the shape of the probability distribution and if you rememberyour high-school physics, you may recognize this equation bears a striking similarity to theBoltzmann distribution that describes the probability p that a system will be in an energy stateE as a function of temperature T and a constant k:In the limit of very low temperatures, only the lowest energy state is occupied or in other wordsp = 1
+ In the opposite limit of high temperatures each energy state is equally likely (p = p )
+Now, if we replace energy with our model’s output logits we can adapt the concept oftemperature: low temperature means that the tokens with high probability get boosted while theprobabilities of less likely tokens get damped
+ In other words the distribution becomes muchsharper
+ When we increase the temperature the distribution smooths out and the probabilitiesget closer to each other
+ The effect of temperature on token probabilities is shown in Figure 8-6
+Figure 8-6
+ Token probabilities as a function of temperatureTo see how we can use temperature to influence the generated text, let’s sample with Tsetting the temperature parameter in the generate function:a shocking finding, scientist discovered a herd of unicorns living in aremote, previously unexplored valley, in the Andes Mountains
+ Even moresurprising to the researchers was the fact that the unicorns spoke perfectEnglish
+While the station aren protagonist receive Pengala nostalgiates tidbitRegarding> Jenny loclonju AgreementCON irrational  rite Continent seaf A jer Turner> Dorbecue WILL Pumpkin mere Thatvernuildagain YoAniamond disse *> Runewitingkusstemprop});b zo coachinginventorymodules deflation press> Vaticanpres Wrestling chargesThingsctureddong Ty physician PET KimBi66 graz> Oz at aff da temporou MD6 radi iterWe can clearly see that a high temperature has produced mostly gibberish; by accentuating therare tokens, we’ve caused the model to create strange grammar and quite a few made-up words!Let’s see what happens if we cool down the temperature:a shocking finding, scientist discovered a herd of unicorns living in aremote, previously unexplored valley, in the Andes Mountains
+ Even moresurprising to the researchers was the fact that the unicorns spoke perfectEnglish
+The scientists were searching for the source of the mysterious sound, which was> making the animals laugh and cry
+The unicorns were living in a remote valley in the Andes mountains'When we first heard the noise of the animals, we thought it was a lion or a> tiger,' said Luis Guzman, a researcher from the University of Buenos Aires,> Argentina
+'But whenThis is significantly more coherent and even includes a quote from yet another university beingcredited with the discovery! The main lesson we can draw from temperature is that it allows usto control the quality of the samples, but there’s always a trade-off between coherence (lowtemperature) and diversity (high temperature) that one has to tune to the use-case at hand
+Another way to adjust the trade-off between coherence and diversity is to truncate thedistribution of the vocabulary
+ This allows us to adjust the diversity freely with the temperature,but in a more limited range that excludes words which would be too strange in the context,i
+e
+ low probability words
+ There are two main ways to do this: top-k and nucleus (or top-p)sampling
+ Let’s take a look
+Top-k and Nucleus SamplingTop-k and nucleus (top-p) sampling are two popular alternatives or extensions to usingtemperature
+ In both cases the basic idea is to restrict the number of possible tokens we cansample from at each timestep
+ To see how this works, let’s first visualize the cumulativeprobability distribution of the model’s outputs at T = 1:Let’s tease apart these plots since they contain a lot of information
+ In the left plot we can see ahistogram of the token probabilities
+ It has a peak around 10 and a second, smaller peakaround 10 , followed by a sharp drop with just a handful of tokens occurring with probabilitybetween 10 and 10 
+ Looking at this diagram we can see that picking the token with thehighest probability (the isolated bar at 10 ) is 1 in 10
+In the right plot we ordered the tokens by descending probability and calculated the cumulativesum of the first 10,000 tokens (in total there are 50,257 tokens in GPT-2’s vocabulary)
+ Theway to read the graph is that the line represents the probability of picking any of the precedingtokens
+ For example, there is roughly a 96% chance of picking any of the 1,000 tokens with thehighest probability
+ We see that the probability rises quickly above 90% but saturates only afterseveral thousand tokens to close to 100%
+ The plot shows that there is a 1 in 100 chance of notpicking any of the tokens that are not even in the top-2,000
+Although these numbers might appear small at first sight, they become important because wesample multiple times when generating text but once per token that is generated
+ So even ifthere is only a 1 in 100 or 1,000 chance, if we sample hundreds of times there is a significantchance of picking an unlikely token at some point
+ And picking such tokens when sampling canbadly influence the quality of the generated text
+ For this reason we generally want to avoidthese very unlikely tokens
+ This is where top-k and top-p sampling come into play
+The idea behind top-k sampling is to avoid the low probability choices by only sampling fromthe k tokens with the highest probability
+ This puts a fixed cut on the long tail of thedistribution and ensures that we only sample from likely choices
+ Going back to the cumulativesum probabilities, top-k sampling is equivalent of defining a vertical line and sampling fromthe tokens on the left
+ Again, the generate function provides an easy method to achieve thiswith the top_k argument:a shocking finding, scientist discovered a herd of unicorns living in aremote, previously unexplored valley, in the Andes Mountains
+ Even moresurprising to the researchers was the fact that the unicorns spoke perfectEnglish
+The wild unicorns roam the Andes Mountains in the region of Cajamarca, on the> border with Argentina (Picture: Alamy/Ecole Nationale Supérieure d'Histoire> Naturelle)The researchers came across about 50 of the animals in the valley
+ They had> lived in such a remote and isolated area at that location for nearly a> thousand years thatThis is arguably the most human-looking text we’ve generated so far
+ Now how do we choose k? Is it independent of the actual output distribution? Indeed, the value of k is chosen manuallyand is the same for each choice in the sequence independent of the actual output distribution
+We can find a good value for k by looking at some text quality metrics which we will explorelater in this chapter, but that fixed cutoff might not be very satisfactory
+Instead of defining a fixed cutoff we can use a dynamic one with nucleus or top-p
+ Instead ofchoosing a cutoff value, we set a condition when to cutoff
+ This condition is when a certainprobability mass in the selection is reached
+ Let’s say we set that value to 95%
+ We then orderall tokens by probability and add one token after another from the top list until the sum of theselected tokens is 95%
+ Depending on the output distribution this could be just one (very likely)token or one hundred (more equally likely) tokens
+ There is again an visual interpretation ofnucleus sampling: the value for p defines a horizontal line on the cumulative sum ofprobabilities plot and we sample only from tokens below the line
+ At this point you areprobably not surprised that the generate function also provides an argument to activate top-psampling:a shocking finding, scientist discovered a herd of unicorns living in aremote, previously unexplored valley, in the Andes Mountains
+ Even moresurprising to the researchers was the fact that the unicorns spoke perfectEnglish
+The scientists studied the DNA of the animals and came to the conclusion that> the herd are descendants of a prehistoric herd that lived in Argentina about> 50,000 years ago
+According to the scientific analysis, the first humans who migrated to South> America migrated into the Andes Mountains from South Africa and Australia,> after the last ice age had ended
+Since their migration, the animals have been adapting toTop-p sampling has also produced a coherent story and this time with a new twist aboutmigrations from Australia to South America
+ You can also combine the two approaches to getthe best of both worlds
+ Setting top_k=50 and top_p=0
+9 corresponds to the rule ofchoosing tokens with a probability mass that is 90% but at most 50 tokens
+Which Decoding Method is Best?Unfortunately, there is no universally “best” decoding method
+ Which approach is best willdepend on the nature of the task you are generating text for
+ If you want your model to performa precise task like arithmetic or providing an answer to a specific question, then you shouldlower the temperature or use deterministic methods like greedy or beam search to guaranteegetting the most likely answer
+ If you want the model to generate longer text and even be a bitcreative, then you should switch to sampling methods and control the temperature or use a mixof top-k and nucleus sampling
+ConclusionIn this chapter we looked at text generation which is a very different task to the NLU tasks weencountered previously
+ Generating text requires at least one forward pass per generated tokenand even more if we use beam search
+ This makes text generation computationally demandingand one needs the right infrastructure to run text generation at scale
+ In addition, a gooddecoding strategy that transforms the model’s output probabilities into descrete tokens canimprove the text quality
+ Finding the best decoding strategy requires some experimentation andbased on the generated texts we can decide which yields the best texts
+In practice, however, we don’t want to make these decisions based on gut feeling alone! Likeother NLP tasks, we should choose a model performance metric that reflects the problem wewant to solve
+ Unsurprisingly, here there are also a wide range of choices, and we willencounter the most common ones later in the next chapter where we have a look at how to trainand evaluate a model for text summarization
+ If you can’t wait to learn how to train a GPT typemodel from scratch you can skip right to [Link to Come] where we collect a large dataset ofcode and then train a autoregressive language model on it

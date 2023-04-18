@@ -1,0 +1,305 @@
+Chapter 3
+ Transformer AnatomyA NOTE FOR EARLY RELEASE READERSWith Early Release ebooks, you get books in their earliest form—theauthor’s raw and unedited content as they write—so you can takeadvantage of these technologies long before the official release of thesetitles
+This will be the 3rd chapter of the final book
+ Please note that theGitHub repo will be made active later on
+If you have comments about how we might improve the content and/orexamples in this book, or if you notice missing material within thischapter, please reach out to the editor at mpotter@oreilly
+com
+Now that we’ve seen what it takes to fine-tune and evaluate a transformer inChapter 2, let’s take a look at how they work under the hood
+ In this chapterwe’ll explore what the main building blocks of transformer models looklike and how to implement them using PyTorch
+ We first focus on buildingthe attention mechanism and then add the bits and pieces necessary to makea transformer encoder work
+ We also have a brief look at the architecturaldifferences between the encoder and decoder modules
+ By the end of thischapter you will be able to implement a simple transformer model yourself!While a deep, technical understanding of the transformer architecture isgenerally not necessary to use the Transformers library and fine-tunemodels to your use-case, it can help understand and navigate the limitationsof the architecture or expand it to new domains
+This chapter also introduces a taxonomy of transformers to help usunderstand the veritable zoo of models that has emerged in recent years
+Before diving into the code, let’s start with an overview of the originalarchitecture that kick-started the transformer revolution
+The TransformerAs we saw in Chapter 1, the original Transformer is based on the encoderdecoder architecture that is widely used for tasks like machine translation,where a sequence of words is translated from one language to another
+ Thisarchitecture consists of two components:EncoderConverts an input sequence of tokens into a sequence of embeddingvectors, often called the hidden state or context
+DecoderUses the encoder’s hidden state to iteratively generate an outputsequence of tokens, one token at a time
+Before the arrival of transformers, the building blocks of the encoder anddecoder were typically recurrent neural networks such as LSTMs,1augmented with a mechanism called attention
+2 Instead of using a fixedhidden state for the whole input sequence, attention allowed the decoder toassign a different amount of weight or “attention” to each of the encoderstates at every decoding timestep
+ By focusing on which input tokens aremost relevant at each timestep, these models were able to learn non-trivialalignments between the words in a generated translation and those in asource sentence
+ For example, Figure 3-1 visualizes the attention weightsfor an English to French translation model and shows hows the decoder isable to correctly align the words “zone” and “Area” which are ordereddifferently in the two languages
+Figure 3-1
+ RNN encoder-decoder alignment of words in the source language (English) andgenerated translation (French), where each pixel denotes an attention weight
+Although attention produced much better translations, there was still amajor shortcoming with using recurrent models for the encoder anddecoder: the computations are inherently sequential which preventsparallelization across tokens in the input sequence
+With the Transformer, a new modeling paradigm was introduced: dispensewith recurrence altogether, and instead rely entirely on a special form ofattention called self-attention
+ We’ll cover self-attention in more detail later,but in simple terms it is like attention except that it operates on hiddenstates of the same type
+ So, although the building blocks changed in theTransformer, the general architecture remained that of an encoder-decoderas shown in Figure 3-2
+ This architecture can be trained to convergencefaster than recurrent models and paved the way for many of the recentbreakthroughs in NLP
+Figure 3-2
+ Encoder-decoder architecture of the Transformer, with the encoder shown in the upperhalf of the figure and the decoder in the lower half
+We’ll look at each of the building blocks in detail shortly, but we canalready see a few things in Figure 3-2 that characterize the Transformerarchitecture:The input text is tokenized and converted to token embeddingsusing the techniques we encountered in Chapter 2
+ Since theattention mechanism is not aware of the relative positions of thetokens, we need a way to inject some information about tokenpositions in the input to model the sequential nature of text
+ Thetoken embeddings are thus combined with positional embeddingsthat contain positional information for each token
+The encoder consists of a stack of encoder layers or “blocks”which is analogous to stacking convolutional layers in computervision
+ The same is true for the decoder which has its own stack ofdecoder layers
+The encoder’s output is fed to each decoder layer, which thengenerates a prediction for the most probable next token in thesequence
+ The output of this step is then fed back into the decoderto generate the next token, and so on until a special end-ofsequence token is reached
+The Transformer architecture was originally designed for sequence-tosequence tasks like machine translation, but both the encoder and decodersubmodules were soon adapted as stand-alone models
+ Although there arehundreds of different transformer models, most of them belong to one ofthree types:Encoder-onlyThese models convert an input sequence of text into a rich numericalrepresentation that is well suited for tasks like text classification ornamed entity recognition
+ BERT and its variants like RoBERTa andDistilBERT belong to this class of architectures
+Decoder-onlyGiven a prompt of text like “Thanks for lunch, I had a …”, these modelswill auto-complete the sequence by iteratively predicting the mostprobable next word
+ The family of GPT models belong to this class
+Encoder-decoderUsed for modeling complex mappings from one sequence of text toanother
+ Suitable for machine translation and summarization
+ TheTransformer, BART and T5 models belong to this class
+NOTEIn reality, the distinction between applications for decoder-only versus encoder-onlyarchitectures is a bit blurry
+ For example, decoder-only models like those in the GPTfamily can be primed for tasks like translation that are conventionally thought of as asequence-to-sequence task
+ Similarly, encoder-only models like BERT can be applied tosummarization tasks that are usually associated with encoder-decoder or decoder-onlymodels
+3Now that we have a high-level understanding of the Transformerarchitecture, let’s take a closer look at the inner workings of the encoder
+Transformer EncoderAs we saw earlier, the Transformer’s encoder consists of many encoderlayers stacked next to each other
+ As illustrated in Figure 3-3, each encoderlayer receives a sequence of embeddings and feeds them through thefollowing sub-layers:A multi-head self-attention layer
+A feed-forward layer
+The output embeddings of each encoder layer have the same size as theinputs and we’ll soon see that the main role of the encoder stack is to“update” the input embeddings to produce representations that encode somecontextual information in the sequence
+Figure 3-3
+ Zooming into the encoder layer
+Each of these sub-layers also has a skip connection and layer normalization,which are standard tricks to train deep neural networks effectively
+ But totruly understand what makes a transformer work we have to go deeper
+Let’s start with the most important building block: the self-attention layer
+Self-AttentionAs we discussed earlier in this chapter, self-attention is a mechanism thatallows neural networks to assign a different amount of weight or “attention”to each element in a sequence
+ For text sequences, the elements are tokenembeddings like the ones we encountered in Chapter 2, where each token ismapped to a vector of some fixed dimension
+ For example, in BERT eachtoken is represented as a 768-dimensional vector
+ The “self” part of selfattention refers to the fact that these weights are computed for all hiddenstates in the same set, e
+g
+ all the hidden states of the encoder
+ By contrast,the attention mechanism associated with recurrent models involvescomputing the relevance of each encoder hidden state to the decoder hiddenstate at a given decoding timestep
+The main idea behind self-attention is that instead of using a fixedembedding for each token, we can use the whole sequence to compute aweighted average of each embedding
+ A simplified way to formulate this isto say that given a sequence of token embeddings x , 
+
+
+, x , self-attentionproduces a sequence of new embeddings y , 
+
+
+, y where each y is a linearcombination of all the x :The coefficients w are called attention weights and are normalized so thatTo see why averaging the token embeddings might be a goodidea, consider what comes to mind when you see the word “flies”
+ Youmight think of an annoying insect, but if you were given more context like“time flies like an arrow” then you would realize that “flies” refers to theverb instead
+ Similarly, we can create a representation for “flies” thatincorporates this context by combining all the token embeddings indifferent proportions, perhaps by assigning a larger weight w to the tokenembeddings for “time” and “arrow”
+ Embeddings that are generated in thisway are called contextualized embeddings and predate the invention oftransformers with language models like ELMo4
+ A cartoon of the process isshown in Figure 3-4 where we illustrate how, depending on the context, twodifferent representations for “flies” can be generated via self-attention
+Figure 3-4
+ Cartoon of how self-attention updates raw token embeddings (upper) into contextualizedembeddings (lower) to create representations that incorporate information from the whole sequence
+Let’s now take a look at how we can calculate the attention weights
+Scaled Dot-Product AttentionThere are several ways to implement a self-attention layer, but the mostcommon one is scaled dot-product attention from the Attention is All YouNeed paper where the Transformer was introduced
+ There are four mainsteps needed to implement this mechanism:Create query, key, and value vectorsEach token embedding is projected into three vectors called query, key,and value
+Compute attention scoresDetermine how much the query and key vectors relate to each otherusing a similarity function
+ As the name suggests, the similarity functionfor scaled dot-product attention is a dot-product matrix multiplication ofthe embeddings
+ Queries and keys that are similar will have a large dotproduct, while those that don’t share much in common will have little tono overlap
+ The outputs from this step are called the attention scoresand for a sequence with n input tokens, there is a corresponding n × nmatrix of attention scores
+Compute attention weightsDot-products can in general produce arbitrarily large numbers whichcan destabilize the training process
+ To handle this, the attention scoresare first multiplied by a scaling factor and then normalized with asoftmax to ensure all the column values sum to one
+ The resulting n × nmatrix now contains all the attention weights w 
+jiUpdate the token embeddingsOnce the attention weights are computed, we multiply them by thevalue vector to obtain an updated representation for embeddingWe can visualize how the attention weights are calculated with a niftylibrary called BertViz
+ This library provides several functions that can beused for visualizing different aspects of attention in Transformers models
+To visualize the attention weights, we can use the neuron_view modulewhich traces the computation of the weights to show how the query and keyvectors are combined to produce the final weight
+ Since BertViz needs totap into the attention layers of the model, we’ll instantiate our BERTcheckpoint with their model class and then use the show function togenerate the interactive visualization:DEMYSTIFYING QUERIES, KEYS, AND VALUESThe notion of query, key, and value vectors can be a bit cryptic the firsttime you encounter them - for instance, why are they called that? Theorigin of these names is inspired from information retrieval systems, butwe can motivate their meaning with a simple analogy: imagine thatyou’re at the supermarket buying all the ingredients necessary for yourdinner
+ From the dish’s recipe, each of the required ingredients can bethought of as a query, and as you scan through the shelves you look atthe labels (keys) and check if it matches an ingredient on your list(similarity function)
+ If you have a match then you take the item (value)from the shelf
+In this example, we only get one grocery item for every label thatmatches the ingredient
+ Self-attention is a more abstract and “smooth”version of this: every label in the supermarket matches the ingredient tothe extent to which each key matches the query
+Let’s take a look at this process in more detail by implementing the diagramof operations to compute scaled dot-product attention as shown in Figure 35
+Figure 3-5
+ Operations in scaled dot-product attention
+The first thing we need to do is tokenize the text, so let’s use our tokenizerto extract the input IDs:As we saw in Chapter 2, each token in the sentence has been mapped to aunique ID in the tokenizer’s vocabulary
+ To keep things simple, we’ve alsoexcluded the [CLS] and [SEP] tokens
+ Next we need to create some denseembeddings
+ In PyTorch, we can do this by using atorch
+nn
+Embedding layer that acts as a lookup table for each inputID:Here we’ve used the AutoConfig class to load the config
+json fileassociated with the bert-base-uncased checkpoint
+ In Transformers,every checkpoint is assigned a configuration file that specifies varioushyperparameters like vocab_size and hidden_size, which in ourexample shows us that each input ID will be mapped to one of the 30,522embedding vectors stored in nn
+Embedding, each with a size of 768
+Now we have our lookup table we can generate the embeddings by feedingthe input IDs:This has given us a tensor of size (batch_size, seq_len,hidden_dim), just like we saw in Chapter 2
+ We’ll postpose thepositional encodings for later, so the next step is to create the query, key,and value vectors and calculate the attention scores using the dot-product asthe similarity function:We’ll see later that the query, key, and value vectors are generated byapplying independent weight matrices Wto the embeddings, but fornow we’ve kept them equal for simplicity
+ In scaled dot-product attention,the dot-products are scaled by the size of the embedding vectors so that wedon’t get too many large numbers during training that can cause problemswith back propagation:NOTEThe torch
+bmm function performs a batch matrix-matrix product that simplifies thecomputation of the attention scores where the query and key vectors have size(batch_size, seq_len, hidden_dim)
+ If we ignored the batch dimension wecould calculate the dot product between each query and key vector by simplytransposing the key tensor to have shape (hidden_dim, seq_len) and then usingthe matrix product to collect all the dot-products in a (seq_len, seq_len) matrix
+Since we want to do this for all sequences in the batch independently, we usetorch
+bmm which simply prepends the batch dimension to the matrix dimensions
+This has created a 5 × 5 matrix of attention scores
+ Next we normalize themby applying a softmax so the sum over each column is equal to one
+The final step is to multiply the attention weights by the values
+And that’s it - we’ve gone through all the steps to implement a simplifiedform of self-attention! Notice that the whole process is just two matrixmultiplications and a softmax, so next time you think of “self-attention”you can mentally remember that all we’re doing is just a fancy form ofaveraging
+Let’s wrap these steps in a function that we can use later
+Our attention mechanism with equal query and key vectors will assign avery large score to identical words in the context, and in particular to thecurrent word itself: the dot product of a query with itself is always 1
+ But inpractice the meaning of a word will be better informed by complementarywords in the context than by identical words, e
+g
+ the meaning of “flies” isbetter defined by incorporating information from “time” and “arrow” thanby another mention of “flies”
+ How can we promote this behavior?Let’s allow the model to create a different set of vectors for the query, keyand value of a token by using three different linear projections to projectour initial token vector into three different spaces
+Multi-Headed AttentionIn our simple example, we only used the embeddings “as is” to compute theattention scores and weights, but that’s far from the whole story
+ In practice,the self-attention layer applies three independent linear transformations toeach embedding to generate the query, key, and value vectors
+ Thesetransformations project the embeddings and each projection carries its ownset of learnable parameters, which allows the self-attention layer to focus ondifferent semantic aspects of the sequence
+It also turns out to be beneficial to have multiple sets of linear projections,each one representing a so-called attention head
+ The resulting multiheaded attention layer is illustrated in Figure 3-6
+Figure 3-6
+ Multi-headed attention
+Let’s implement this layer by first coding up a single attention head
+Here we’ve initialized three independent linear layers that apply matrixmultiplication to the embedding vectors to produce tensors of size(batch_size, seq_len, head_dim) where head_dim is thedimension we are projecting into
+ Although head_dim does not have to besmaller than the embedding dimension embed_dim of the tokens, inpractice it is chosen to be a multiple of embed_dim so that thecomputation across each head is constant
+ For example in BERT has 12attention heads, so the dimension of each head is 768/12 = 64
+Now that we have a single attention head, we can concatenate the outputs ofeach one to implement the full multi-headed attention layer
+Notice that the concatenated output from the attention heads is also fedthrough a final linear layer to produce an output tensor of size(batch_size, seq_len, hidden_dim) that is suitable for thefeed forward network downstream
+ As a sanity check, let’s see if the multiheaded attention produces the expected shape of our inputs
+It works! To wrap up this section on attention, let’s use BertViz again tovisualise the attention for two different uses of the word “flies”
+ Here wecan use the head_view function from BertViz by computing theattentions, tokens and indicating where the sentence boundary lies
+This visualization shows the attention weights as lines connecting the tokenwhose embedding is getting updated (left), with every word that is beingattended to (right)
+ The intensity of the lines indicates the strength of theattention weights, with values close to 1 dark, and faint lines close to zero
+In this example, the input consists of two sentences and the [CLS] and[SEP] tokens are the special tokens in BERT’s tokenizer that weencountered in Chapter 2
+ One thing we can see from the visualization isthe attention weights are strongest between words that belong to the samesentence, which suggests BERT can tell that it should attend to words in thesame sentence
+ However, for the word “flies” we can see that BERT hasidentified “arrow” and important in the first sentence and “fruit” and“banana” in the second
+ These attention weights allow the model todistinguish the use of “flies” as a verb or noun, depending on the context itoccurs!Now that we’ve covered attention, let’s take a look at implementing themissing piece of the encoder layer: position-wise feed forward networks
+Feed Forward LayerThe feed forward sub-layer in the encoder and decoder is just a simple 2layer fully-connected neural network, but with a twist; instead of processingthe whole sequence of embeddings as a single vector, it processes eachembedding independently
+ For this reason, this layer is often referred to as aposition-wise feed forward layer
+ These position-wise feed forward layersare sometimes also referred to as a one-dimensional convolution withkernel size of one, typically by people with a computer vision background(e
+g
+ the OpenAI GPT codebase uses this nomenclature)
+ A rule of thumbfrom the literature is to pick the hidden size of the first layer to be fourtimes the size of the embeddings and a GELU activation function is mostcommonly used
+ This is where most of the capacity and memorization ishypothesized to happen and the part that is most often scaled when scalingup the models
+We now have all the ingredients to create a fully-fledged transformerencoder layer! The only decision left to make is where to place the skipconnections and layer normalization
+ Let’s take a look and how this affectthe model architecture
+Putting It All TogetherWhen it comes to placing the layer normalization in the encoder or decoderlayers of a transformer, there are two main choices adopted in the literature:Post layer normalizationThis is the arrangement from the Transformer paper and places layernormalization in between the skip connections
+ This arrangement istricky to train from scratch as the gradients can diverge
+ For this reason,you will often see a concept known as learning rate warm-up, where thelearning rate is gradually increased from a small value to somemaximum during training
+Pre layer normalizationThe most common arrangement found in the literature and places layernormalization in between the skip connections
+ Tends to be much morestable during training and does not usually require learning ratewarmup
+The difference between the two arrangements is illustrated in Figure 3-7
+Figure 3-7
+ Different arrangements of layer normalization in a transformer encoder layer
+Let’s now test this with our input embeddings
+It works! We’ve now implemented our very first transformer encoder layerfrom scratch! In principle we could now pass the input embeddings throughthe encoder layer
+ However, there is a caveat with the way we setup theencoder layers: they are totally invariant to the position of the tokens
+ Sincethe multi-head attention layer is effectively a fancy weighted sum, there isno way to encode the positional information in the sequence
+5Luckily there is an easy trick to incorporate positional information withpositional encodings
+ Let’s take a look
+Positional EmbeddingsPositional embeddings are based on a simple, yet very effective idea:augment the token embeddings with a position-dependent pattern of valuesarranged in a vector
+ If the pattern is characteristic for each position, theattention heads and feed-forward layers in each stack can learn toincorporate positional information in their transformations
+There are several ways to achieve this and one of the most popularapproaches, especially when the pretraining dataset is sufficiently large, isto use a learnable pattern
+ This works exactly the same way as the tokenembeddings but using the position index instead of the token ID as input
+With that approach an efficient way of encoding the position of tokens islearned during pretraining
+Let’s create a custom Embeddings module that combines a tokenembedding layer that projects the input_ids to a dense hidden statetogether with the positional embedding that does the same forposition_ids
+ The resulting embedding is simply the sum of bothembeddings
+We see that the embedding layer now creates a single, dense embedding foreach token
+ While learnable position embeddings are easy to implement andwidely used there are several alternatives:Absolute positional representationsThe Transformer model uses static patterns to encode the position of thetokens
+ The pattern consists of modulated sine and cosine signals andworks especially well in the low data regime
+Relative positional representationsAlthough absolute positions are important one can argue that forcomputing a token embedding mostly the relative position to the tokenis important
+ Relative positional representations follow that intuitionand encode the relative positions between tokens
+ Models such asDeBERTa use such representations
+Rotary position embeddingsBy combining the idea of absolute and relative positionalrepresentations rotary position embeddings achieve excellent results onmany tasks
+ A recent example of rotary position embeddings in action isGPT-Neo
+Let’s put it all together now by building the full transformer encoder bycombining the embeddings with the encoder layers
+We can see that we get a hidden state for each token in the batch
+ Thisoutput format makes the architecture very flexible and we can easily adaptit for various applications such as predicting missing tokens in maskedlangauge modeling or predicting start and end position of an answer inquestion-answering
+ Let’s see how we can build a classifier with theencoder like the one we used in Chapter 2 in the following section
+Bodies and HeadsSo now that we have a full transformer encoder model we would like tobuild a classifier with it
+ The model is usually divided into a taskindependant body and a task specific head
+ What we’ve built so far is thebody and we now need to attach a classification head to that body
+ Since wehave a hidden state for each token but only need to make one predictionthere are several option how to approach this
+ Traditionally, the first tokenin such models is used for the prediction and we can attach a dropout andlinear layer to make a classification prediction
+ The following class extendsthe existing encoder for sequence classification
+Before initializing the model we need to define how many classes we wouldlike to predict
+That is exactly what we have been looking for
+ For each example in thebatch we get the un-normalized logits for each class in the output
+ Thiscorresponds to the BERT model that we used in Chapter 2 to detectemotions in tweets
+This concludes our analysis of the encoder, so let’s now cast our attention(pun intended!) to the decoder
+Transformer DecoderAs illustrated in Figure 3-8, the main difference between the decoder andencoder is that the decoder has two attention sublayers:Masked multi-head attentionEnsures that the tokens we generate at each timestep are only based onthe past outputs and the current token being predicted
+ Without this, thedecoder could cheat during training by simply copying the targettranslations, so masking the inputs ensures the task is not trivial
+Encoder-decoder attentionPerforms multi-head attention over the output key and value vectors ofthe encoder stack, with the intermediate representation of the decoderacting as the queries
+ This way the encoder-decoder attention layerlearns how to relate tokens from two different sequences such as twodifferent languages
+Figure 3-8
+ Zooming into the Transformer decoder layer
+Let’s take a look at the modifications we need to include masking in selfattention, and leave the implementation of the encoder-decoder attentionlayer as a homework problem
+ The trick with masked self-attention is tointroduce a mask matrix with ones on the lower diagonal and zeros above
+Here we’ve used PyTorch’s tril function to create the lower triangularmatrix
+ Once we have this mask matrix, we can the prevent each attentionhead from peeking at future tokens by usingtorch
+Tensor
+masked_fill to replace all the zeros with negativeinfinity
+By setting the upper values to negative infinity, we guarantee that theattention weights are all zero once we take the softmax over the scoresbecause e = 0
+ We can easily include this masking behavior with a smallchange to our scaled dot-product attention function that we implementedearlier in this chapter
+From here it is a simple matter to build up the decoder layer and we pointthe reader to the excellent implementation of minGPT by Andrej Karpathyfor details
+ Okay this was quite a lot of technical detail, but now we have agood understanding on how every piece of the Transformer architectureworks
+ Let’s round out the chapter by stepping back a bit and looking at thelandscape of different transformer models and how they relate to each other
+Meet the TransformersAs we have seen in this chapter there are three main architectures fortransformer models: encoders, decoders, and encoder-decoders
+ The initialsuccess of the early transformer models triggered a Cambrian explosion inmodel development as researchers built models on various datasets ofdifferent size and nature, used new pretraining objectives, and tweaked thearchitecture to further improve performance
+ Although the zoo of models isstill growing fast, the wide variety of models can still be divided into thethree categories of encoders, decoders, and encoder-decoders
+In this section we’ll provide a brief overview of the most importanttransformer models
+ Let’s start by taking a look at the transformer familytree
+The Transformer Tree of LifeOver time, each of three main architecture have undergone an evolution oftheir own which is illustrated in Figure 3-9 where a few of the mostprominent models and their descendants is shown
+Figure 3-9
+ An overview of some of the most prominent transformer architectures
+With over 50 different architectures included in Transformers, this familytree by no means provides a complete overview of all the existingarchitectures, and simply highlights a few of the architectural milestones
+We’ve covered the Transformer in depth in this chapter, so let’s take acloser look at each of the key descendants, starting with the encoder branch
+The Encoder BranchThe first encoder-only model based on the transformer architecture wasBERT
+ At the time it was published, it broke all state-of-the-art results onthe popular GLUE benchmark
+6 Subsequently, the pretraining objective aswell as the architecture of BERT has been adapted to further improve theperformance
+ Encoder-only models still dominate research and industry onnatural language understanding (NLU) tasks such as text classification,named entity recognition, and question-answering
+ Let’s have a brief look atthe BERT model and its variants:BERT(BERT) is pretrained with the two objectives of predicting maskedtokens in texts and determining if two text passages follow each other
+The former task is called masked language modeling (MLM) an thelatter next-sentence-prediction (NSP)
+ BERT used the BookCorpus andEnglish Wikipedia for pretraining and the model can then be fine-tunedon any NLU tasks with very little data
+DistilBERTAlthough BERT delivers great results it can be expensive and difficultto deploy in production due to its sheer size
+ By using knowledgedistillation during pretraining DistilBERT achieves 97% of BERT’sperformance while using 40% less memory and being 60% faster
+ Youcan find more details on knowledge distillation in Chapter 5
+RoBERTaA study following the release of BERT revealed that the performance ofBERT can be further improved by modifying the pretraining scheme
+RoBERTa is trained longer, on larger batches with more training dataand dropped the NSP task to significantly improve the performanceover the original BERT model
+XLMIn the work of XLM, several pretraining objectives for buildingmultilingual models were explored, including the autoregressivelanguage modeling from GPT-like models and MLM from BERT
+ Inaddition, the authors introduced translation language modeling (TLM)which is an extension of MLM to mulitple language inputs
+Experimenting with these pretraining tasks they achieved state of the arton several multilingual NLU benchmarks as well as on translation tasks
+XLM-RoBERTaFollowing the work of XLM and RoBERTa, the XLM-RoBERTA orXLM-R model takes multilingual pretraining one step further bymassively up-scaling the training data
+ Using the Common Crawlcorpus they created a dataset with 2
+5 terabytes of text and train anencoder with MLM on this dataset
+ Since the dataset only containsmonolingual data without any parallel texts, the TLM objective of XLMis dropped
+ This approach beats XLM and multilingual BERT variantsby a large margin especially on low resource languages
+ALBERTThe ALBERT model introduced three changes to make the encoderarchitecture more efficient
+ First, it decoupled the token embeddingdimension from the hidden dimension, thus allowing the embeddingdimension to be small and saving parameters especially when thevocabulary gets large
+ Second, all layers share the parameters whichdecreases the number of effective parameters even further
+ Finally, theyreplace the NSP objective with a sentence-ordering prediction thatneeds to predict if the order of two sentences was swapped or not ratherthan prediction if they belong together at all
+ These changes allow thetraining of even larger models that have fewer parameters that showsuperior performance on NLU tasks
+ELECTRAOne limitation of the standard MLM pretraining objective is that at eachtraining step only the representations of the masked tokens are updatedwhile the the other input tokens are not
+ To address this issue,ELECTRA uses a two model approach: the first model (which istypically small) works like a standard MLM and predicts maskedtokens
+ The second model called the discriminator is then tasked topredict which of the tokens in the first model output sequence wereoriginally masked
+ Therefore, the discriminator needs to make a binaryclassification for every token which makes training 30 times moreefficient
+ For downstream tasks the discriminator is fine-tuned like astandard BERT model
+DeBERTaThe DeBERTa model introduces two architectural changes
+ On the onehand the authors recognized the importance of position in transformersand disentangled it from the content vector
+ With two separate andindependent attention mechanisms, both a content and a relativeposition embedding are processed at each layer
+ On the other hand, theabsolute position of a word is also important, especially for decoding
+For this reason an absolute position embedding is added just before theSoftMax layer of the token decoding head
+ DeBERTa is the first model(as an ensemble) to beat the human baseline on the SuperGLUEbenchmark7
+The Decoder BranchThe progress on transformer decoder models has been spearheaded to alarge extent by OpenAI
+ These models are exceptionally good at predictingthe next word in a sequence and are thus mostly used for text generationtasks (see Chapter 8 for more details)
+ Their progress has been fueled byusing larger datasets and scaling the language models to larger and largersizes
+ Let’s have a look at the evolution of these fascinating generationmodels:GPTThe introduction of GPT combined two key ideas in NLP: the novel andefficient transformer decoder architecture and transfer learning
+ In thatsetup the model is pretrained by predicting the next word based on thecontext
+ The model was trained on the BookCorpus and achieved greatresults on downstream tasks such as classification
+GPT-2Inspired by the success of the simple and scalable pretraining approachthe original model and training set were up-scaled to produce GPT-2
+This model is able to produce long sequences with coherent text
+ Due toconcerns of misuse, the model was released in a staged fashion withsmaller models being published first and the full model later
+CTRLModels like GPT-2 can continue given an input sequence or prompt
+However, the user has little control over the style of the generatedsequence
+ The CTRL model addresses this issue by adding “controltokens” at the beginning of the sequence
+ That way the style of thegeneration can be controlled and allow for diverse generations
+GPT-3Following the success of scaling GPT up to GPT-2, a thorough surveyinto the scaling laws of language models8 revealed that there are simplepower laws that govern the relation between compute, dataset size,model size and the performance of a language model
+ Inspired by theseinsights, GPT-2 was up-scaled by a factor of 100 to yield GPT-3 with175 billion parameters
+ Besides being able to generate impressivelyrealistic text passages, the model also exhibits few-shot learningcapabilities: with a few examples of a novel task such as text-to-codeexamples the model is able to accomplish the task on new examples
+OpenAI has not open-sourced this model, but provides an interfacethrough the OpenAI API
+GPT-Neo/GPT-J-6BGPT-Neo and GPT-J-6B are GPT-like models that are trained byEleutherAI, which is a collective of researchers who aim to recreate andrelease GPT-3 scale models
+ The current models are smaller variants ofthe full 175 billion parameter model, with 2
+7 and 6bn parameters thatare competitive with the smaller GPT-3 models OpenAI offers
+The Encoder-Decoder BranchAlthough it has become common to build models using a single encoder ordecoder stack, there are several encoder-decoder variants of theTransformer that have novel applications across both NLU and NLGdomains:T5The T5 model unifies all NLU and NLG tasks by converting all tasksinto text-to-text
+ As such all tasks are framed as sequence-to-sequencetasks where adopting an encoder-decoder architecture is natural
+ The T5architecture uses the original Transformer architecture
+ Using the largecrawled C4 dataset, the model is pre-trained with masked languagemodeling as well as the SuperGLUE tasks by translating all of them totext-to-text tasks
+ The largest model with 11 billion parameters yieldedstate-of-the-art results on several benchmarks although beingcomparably large
+BARTBART combines the pretraining procedures of BERT and GPT withinthe encoder-decoder architecture
+ The input sequences undergoes one ofseveral possible transformation from simple masking, sentencepermutation, token deletion to document rotation
+ These inputs arepassed through the encoder and the decoder has to reconstruct theoriginal texts
+ This makes the model more flexible as it is possible touse it for NLU as well as NLG tasks and it achieves state-of-the-artperformance on both
+M2M-100Conventionally a translation model is built for one language-pair andtranslation direction
+ Naturally, this does not scale to many languagesand in addition there might be shared knowledge between languagepairs that could be leveraged for translation between rare languages
+M2M-100 is the first translation model that can translate between any of100 languages
+ This allows for high quality translations between rareand underrepresented languages
+BigBirdOne main limitation of transformer architectures is the maximumcontext size due to the quadratic memory requirements of the attentionmechanism
+ BigBird addresses this issue by using a sparse form ofattention that scales linearly
+ This allows for the drastic scaling ofcontexts which is 512 tokens in most BERT models to 4,096 in BigBird
+This is especially useful in cases where long dependencies need to beconserved such as in text summarization
+ConclusionWe started at the heart of the Transformer architecture with a deep-dive intoself-attention and subsequently added all the necessary parts to build atransformer encoder model
+ We added embedding layers for tokens andpositional information, built in a feed forward layer to complement theattention heads and we finally added a classification head to the model bodyto make predictions
+ We also had a look at the decoder side of theTransformer architecture and concluded the chapter with an overview of themost important model architectures
+With the code that we’ve implemented in this chapter you are well-placedto understand the source code of Transformers and even contribute yourfirst model to the library! There is a guide in the Transformerdocumentation that provides you with the information needed to get started
+Now that we have a better understanding of the underlying principles let’sgo beyond simple classification and build a question-answering model inthe next chapter

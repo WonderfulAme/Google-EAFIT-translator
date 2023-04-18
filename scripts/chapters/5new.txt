@@ -1,0 +1,350 @@
+Chapter 5
+ Making TransformersEfficient in ProductionA NOTE FOR EARLY RELEASE READERSWith Early Release ebooks, you get books in their earliest form—the author’s raw andunedited content as they write—so you can take advantage of these technologies longbefore the official release of these titles
+This will be the 5th chapter of the final book
+ Please note that the GitHub repo will bemade active later on
+If you have comments about how we might improve the content and/or examples in thisbook, or if you notice missing material within this chapter, please reach out to the editor atmpotter@oreilly
+com
+In the previous chapters, you’ve seen how Transformers can be fine-tuned to produce greatresults on a wide range of tasks
+ However, in many situations accuracy (or whatever metricyou’re optimizing for) is not enough; your state-of-the-art model is not very useful if it’s tooslow or large to meet the business requirements of your application
+ An obvious alternative isto train a faster and more compact model, but the reduction in model capacity is oftenaccompanied by a degradation in performance
+ So what can you do when you need a fast,compact, yet highly accurate model?In this chapter we will explore four complementary techniques that can be used to speed up thepredictions and reduce the memory footprint of your Transformer models: knowledgedistillation, quantization, pruning, and graph optimization with the Open Neural NetworkExchange (ONNX) format and ONNX Runtime (ORT)
+ We’ll also see how some of thesetechniques can be combined to produce significant performance gains
+ For example, this wasthe approach taken by the Roblox engineering team in their article How We Scaled Bert ToServe 1+ Billion Daily Requests on CPUs, who showed in Figure 5-1 that combiningknowledge distillation and quantization enabled them to improve the latency and throughput oftheir BERT classifier by over a factor of 30!Figure 5-1
+ How Roblox scaled BERT with knowledge distillation, dynamic padding, and weight quantization (photo courtesy of Roblox employees Quoc N
+ Le and Kip Kaehler)To illustrate the benefits and trade-offs associated with each technique, we’ll use intentdetection as a case study since it’s an important component of text-based assistants, where lowlatencies are critical for maintaining a conversation in real-time
+ Along the way we’ll learn howto create custom trainers, perform efficient hyperparameter search, and gain a sense for what ittakes to implement cutting-edge research with Transformers
+ Let’s dive in!Intent Detection as a Case StudyLet’s suppose that we’re trying to build a text-based assistant for our company’s call center sothat customers can request the balance of their account or make bookings without needing tospeak with a human agent
+ In order to understand the goals of a customer, our assistant willneed to be able to classify a wide variety of natural language text into a set of predefinedactions or intents
+ For example, a customer may send a message about an upcoming tripHey, I’d like to rent a vehicle from Nov 1st to Nov 15th in Paris and I need a 15 passengervanand our intent classifier could automatically categorize this as a Car Rental intent, which thentriggers an action and response
+ To be robust in a production environment, our classifier willalso need to be able to handle out-of-scope queries like those shown in the second and thirdcases of Figure 5-2, where a customer makes a query that doesn’t belong to any of thepredefined intents and the system should yield a fallback response
+ For example, in the secondcase of Figure 5-2, a customer asks a question about sport which is out-of-scope and the textassistant mistakenly classifies it as one of the known in-scope intents, which is fed to adownstream component that returns the payday response
+ In the third case, the text-assistanthas been trained to detect out-of-scope queries (usually labelled as a separate class) and informsthe customer about which topics they can respond to
+Figure 5-2
+ Three exchanges between a human (right) and a text-based assistant (left) for personal finance (courtesy of StefanLarson et al
+)
+As a baseline we’ve fine-tuned a BERT-base model that achieves around 94% accuracy on theCLINC150 dataset
+1 This dataset includes 22,500 in-scope queries across 150 intents and 10domains like banking and travel, and also includes 1,200 out-of-scope queries that belong to anoos intent class
+ In practice we would also gather our own in-house dataset, but using publicdata is a great way to iterate quickly and generate preliminary results
+To get started, let’s download our fine-tuned model from the Hugging Face Hub and wrap it ina pipeline for text classification
+Here we’ve set the model’s device to cpu since our text-assistant will need to operate in anenvironment where queries are processed and responded to in real-time
+ Although we could usea GPU to run inference, this would be expensive if the machine is idle for extended periods oftime or would require us to batch the incoming queries which introduces additional complexity
+In general, the choice between running inference on a CPU or GPU depends on the applicationand a balance between simplicity and cost
+ Several of the compression techniques covered inthis chapter work equally well on a GPU, so you can easily adapt them to your own GPUpowered applications if needed
+Now that we have a pipeline, we can pass a query to get the predicted intent and confidencescore from the model
+Great, the car_rental intent makes sense so let’s now look at creating a benchmark that wecan use to evaluate the performance of our baseline model
+Creating a Performance BenchmarkLike any other machine learning model, deploying Transformers in production environmentsinvolves a trade-off among several constraints, the most common being:2Model performanceHow well does our model perform on a well-crafted test set that reflects production data?This is especially important when the cost of making errors is large (and best mitigated witha human-in-the-loop) or when we need to run inference on millions of examples, and smallimprovements to the model metrics can translate into large gains in aggregate
+LatencyHow fast can our model deliver predictions? We usually care about latency in real-timeenvironments that deal with a lot of traffic, like how Stack Overflow needed a classifier toquickly detect unwelcome comments on their website
+MemoryHow can we deploy billion-parameter models like GPT-2 or T5 that require gigabytes ofdisk storage and RAM? Memory plays an especially important role in mobile or edgedevices, where a model has to generate predictions without access to a powerful cloudserver
+Failing to address these constraints can have a negative impact on the user experience of yourapplication, or more commonly, lead to ballooning costs from running expensive cloud serversthat may only need to handle a few requests
+ To explore how each of the these constraints canbe optimized with various compression techniques, let’s begin by creating a simple benchmarkthat measures each quantity for a given pipeline and test set
+ A skeleton of what we’ll need isgiven by the following class
+In this class, we’ve defined the optim_type parameter to keep track of the differentoptimization techniques that we’ll cover in this chapter
+ We’ll use the run_benchmarkfunction to collect all the metrics in a dictionary, with keys given by optim_type
+Let’s now put some flesh on this class by computing the model accuracy on the test set
+ Firstwe need some data to test on, so let’s download the CLINC150 dataset that was used to finetune our baseline model
+ We can get the dataset from the Hub with the Datasets library asfollows,Each example in the CLINC150 dataset consists of a query in the text column and itscorresponding intent
+ We’ll use the test set to benchmark our models, so let’s take a look at oneof the dataset’s examples
+The intents are provided as IDs, but we can easily get the mapping to strings (and vice versa)by accessing the Dataset
+features attribute,Now that we have a basic understanding of the contents in the CLINC150 dataset, let’simplement the compute_accuracy function
+ Since the dataset is balanced across the intentclasses, we’ll use accuracy as our metric which we can load from Datasets as followsThe metric’s description tells us that we need to provide the predictions and references (i
+e
+ theground truth labels) as integers, so we can use the pipeline to extract the predictions from thetext field and then use the ClassLabel
+str2int function to map the prediction to itscorresponding ID
+ The following code collects all the predictions and labels in lists beforereturning the accuracy on the dataset
+ Let’s also add it to our PerformanceBenchmarkclass
+Next, let’s compute the size of our model by using the torch
+save function from PyTorch toserialize the model to disk
+ Under the hood, torch
+save uses Python’s pickle module andcan be used to save anything from models to tensors to ordinary Python objects
+ In PyTorch,the recommended way to save a model is by using its state_dict, which is a Pythondictionary that maps each layer in a model to its learnable parameters (i
+e
+ weights and biases)
+Let’s see what is stored in the state_dict of our baseline model
+We can clearly see that each key-value pair corresponds to a specific layer and tensor in BERT
+So if we save our model with
+we can then use the Path
+stat function from Python’s pathlib module to get informationabout the underlying files
+ Finally let’s implement the time_pipeline function so that we can time the median latencyper query
+ For this application, latency refers to the time it takes to feed a text query to thepipeline and return the predicted intent from the model
+ Under the hood, the pipeline alsotokenizes the text but this is around 1,000 times faster than generating the predictions and thusadds a negligible contribution to the overall latency
+ A simple way to measure the time of acode snippet is to use the perf_counter function from Python’s time module
+ Thisfunction has a better time resolution than the time
+time function and so is well suited forgetting precise results
+We can use perf_counter to time our pipeline by passing our test query and calculating thetime difference in milliseconds between the start and end
+These results exhibit quite some spread in the latencies and suggest that timing a single passthrough the pipeline can give wildly different results each time we rerun the code
+ So instead,we’ll collect the latencies over many runs and then use the resulting distribution to calculate themean and standard deviation, which will give us an idea about the spread in values
+ Thefollowing code does what we need and includes a phase to warm-up the CPU beforeperforming the actual timed run
+Benchmarking Our Baseline ModelNow that our PerformanceBenchmark is complete, let’s give it a spin! For the baselinemodel we just need to pass the pipeline and dataset we wish to perform the benchmark on, andwe’ll collect the results in the perf_metrics dictionary to keep track of each model’sperformance
+Now that we have a reference point, let’s look at our first compression technique: knowledgedistillation
+NOTEThe average latency values will differ depending on what type of hardware you are running on
+ For the purposesof this chapter, what’s important is the relative difference in latencies between models
+ Once we have determinedthe best performing model we can then explore different backends to reduce the absolute latency if needed
+Making Models Smaller via Knowledge DistillationKnowledge distillation is a general-purpose method for training a smaller student model tomimic the behavior of a slower, larger, but better performing teacher
+ Originally introduced in20063 in the context of ensemble models, it was later popularized in a famous 2015 paper4 byGeoff Hinton, Oriol Vinyals, and Jeff Dean who generalized the method to deep neuralnetworks and applied it to image classification and automatic speech recognition
+Given the trend shown in Figure 5-3 towards pretraining language models with ever-increasingparameter counts (the largest5 at over one trillion parameters at the time of writing this book!),knowledge distillation has also become a popular strategy to compress these huge models andmake them more suitable for building practical applications
+Figure 5-3
+ Parameter counts of several recent pretrained language models
+Knowledge Distillation for Fine-tuningSo how is knowledge actually “distilled” or transferred from the teacher to the student duringtraining? For supervised tasks like fine-tuning, the main idea is to augment the ground truthlabels with a distribution of “soft probabilities” from the teacher which provide complementaryinformation for the student to learn from
+ For example, if our BERT-base classifier assigns highprobabilities to multiple intents, then this could be a sign that these intents lie close to eachother in the feature space
+ By training the student to mimic these probabilities, the goal is todistill some of this “dark knowledge”6 that the teacher has learnt; knowledge which is notavailable from the labels alone
+Mathematically, the way this works is as follows
+ Suppose we feed an input sequence x to theteacher to generate a vector of logits
+ We can convert these logits into probabilities by applying a softmax function
+but this isn’t quite what we want because in many cases the teacher will assign a highprobability to one class, with all other class probabilities close to zero
+ When that happens, theteacher doesn’t provide much additional information beyond the ground truth labels, so insteadwe “soften” the probabilities by scaling the logits with a positive temperature hyperparameterT before applying the softmax
+As shown in Figure 5-4, higher values of T produce a softer probability distribution over theclasses and reveal much more information about the decision boundary that the teacher haslearned for each training example
+ When T = 1 we recover the original softmax distribution
+Figure 5-4
+ Comparison of a hard label which is one-hot encoded (left), softmax probabilities (middle) and softened classprobabilities (right)
+Since the student also produces softened probabilities qKullback-Leibler (KL) divergenceto measure the difference between the two probability distributions and thereby define aknowledge distillation loss:where T is a normalization factor to account for the fact that the magnitude of the gradientsproduced by soft labels scales as 1/T 
+ For classification tasks, the student loss is then aweighted average of the distillation loss with the usual cross-entropy loss L of the groundtruth labels:where a is a hyperparameter that controls the relative strength of each loss
+ A diagram of thewhole process is shown in Figure 5-5 and the temperature is set to 1 at inference time torecover the standard softmax probabilities
+Figure 5-5
+ Cartoon of the knowledge distillation process
+Knowledge Distillation for PretrainingKnowledge distillation can also be used during pretraining to create a general-purpose studentthat can be subsequently fine-tuned on downstream tasks
+ In this case, the teacher is apretrained language model like BERT which transfers its knowledge about masked-languagemodeling to the student
+ For example, in the DistilBERT paper,7 the masked-languagemodeling loss Lis augmented with a term from knowledge distillation and a cosineembedding loss to align the directions of the hidden state vectorsbetween the teacher and student
+Since we already have a fine-tuned BERT-base model, let’s see how we can use knowledgedistillation to fine-tune a smaller and faster model
+ To do that we’ll need a way to augment thecross-entropy loss with a Lterm; fortunately we can do this by creating our own trainer!Let’s take a look at how to do this in the next section
+Creating a Knowledge Distillation TrainerTo implement knowledge distillation we need to add a few things to the Trainer base class:The new hyperparameters α and T which control the relative weight of the distillationloss and how much the probability distribution of the labels should be smoothed
+The fine-tuned teacher model, which in our case is BERT-baseA new loss function that includes the cross-entropy loss with the knowledgedistillation loss
+Adding the new hyperparameters is quite simple since we just need to subclassTrainingArguments and include them as new attributes
+For the trainer itself, we want a new loss function so the way to implement this is bysubclassing Trainer and overriding the compute_loss function to include the knowledgedistillation loss term L
+Let’s unpack this code a bit
+ When we instantiate DistillationTrainer we pass ateacher_model argument with a teacher that has already been fine-tuned on our task
+ Next,in the compute_loss function we extract the logits from the student and teacher, scale themby the temperature and then normalize them with a softmax before passing them to PyTorch’snn
+KLDivLoss function for computing the KL divergence
+ Since nn
+KLDivLoss expectsthe inputs in the form of log-probabilities, we’ve used the F
+log_softmax function tonormalize the student’s logits, while the teacher’s logits are converted to probabilities with astandard softmax
+ The reduction=batchmean argument in nn
+KLDivLoss specifiesthat we average the losses over the batch dimension
+Choosing a Good Student InitializationNow that we have our custom trainer, the first question you might have is which pretrainedlanguage model should we pick for the student? In general we should pick smaller model forthe student to reduce the latency and memory footprint, and a good rule of thumb from theliterature8 is that knowledge distillation works best when the teacher and student are of thesame model type
+ One possible reason for this is that different model types, say BERT andRoBERTa, can have different output embedding spaces which hinders the ability of the studentto mimic the teacher
+ In our case study, the teacher is BERT-base so DistilBERT is naturalcandidate to intitialize the student since it has 40% less parameters and has been shown toachieve strong results on downstream tasks
+First we’ll need to tokenize and encode our queries, so let’s instantiate the tokenizer fromDistilBERT and create a simple function to take care of the preprocessing:Here we’ve removed the text column since we no longer need it and we’ve also used thefn_kwargs argument to specify which tokenizer should be used in the tokenize_textfunction
+ We’ve also renamed the intent column to labels so it can be automaticallydetected by the trainer
+ Now that our texts are processed, the next thing to do is instantiateDistilBERT for fine-tuning
+ Since we will be doing multiple runs with the trainer, we’ll use afunction to initialize the model with each new run
+Here we’ve also specified the number of classes our model should expect, and used the baselinemodel’s configuration to provide the mappings id2label and label2id between ID andintent name
+ Next, we need to define the metrics to track during training
+ As we did in theperformance benchmark, we’ll use accuracy as the main metric so we can reuse ouraccuracy_score function in the compute_metrics function that we’ll include in thetrainer
+In this function, the predictions from the sequence modeling head come in the form of logits, sowe use the np
+argmax function to find the most confident class prediction and compare thatagainst the ground truth labels
+Finally, we just need to define the training arguments
+ To warm-up, we’ll set a = 1 to see howwell DistilBERT performs without any signal from the teacherTo compare these results against our baseline, let’s create a scatter plot of the accuracy againstthe latency, with the radius of each point corresponding to the size of the model
+ The followingfunction does what we need and marks the current optimization type as a dashed circle to aidthe comparison to previous results
+From the plot we can see that by using a smaller model we’ve managed to decrease the averagelatency by almost a factor of two
+ And all this at the price of just over a 1% reduction inaccuracy! Let’s see if we can close that last gap by including the distillation loss the teacher andfinding good values for α and T 
+Finding Good Hyperparameters with OptunaSo what values of α and T should we pick? We could do a grid search over the 2D parameterspace but a much better alternative is to use Optuna,10 which is an optimization frameworkdesigned for just this type of task
+ Optuna formulates the search problem in terms of anobjective function that is optimized through multiple trials
+ For example, suppose we wished tominimize Rosenbrock’s “banana function”which is a famous test case for optimization frameworks
+ As shown in Figure 5-6, the functiongets its name from the curved contours and has a global minimum at (x, y) = (1, 1)
+ Findingthe valley is an easy optimization problem, but converging to the global minimum is not
+Figure 5-6
+ Plot of the Rosenbrock function of two variablesIn Optuna, we can find the minimum of f (x, y) by defining an objective function thatreturns the value of f (x, y):The trial
+suggest_float object specifies the parameter ranges to sample uniformlyfrom and Optuna also provides suggest_int and suggest_categorical for integerand categorical parameters respectively
+ Optuna collects multiple trials as a study so to createone we just pass the objective function to study
+optimize as follows:Once the study is completed, we can then find the best parameters as follows:We see that with 1,000 trials, Optuna has managed to find values for x and y that arereasonably close to the global minimum
+ To use Optuna in Transformers, we use a similar logicby first defining the hyperparameter space that we wish to optimize over
+ In addition to α andT , we’ll include the number of training epochs as follows:Running the hyperparameter search with the Trainer is then quite simple; we just need tospecify the number of trials to run and a direction to optimize for
+ Since we want the bestpossible accuracy, we pick direction="maximize" in theTrainer
+The hyperparameter_search method returns a BestRun object which contains thevalue of the objective that was maximized (by default the sum of all metrics) and thehyperparameters it used for that run:This value of α tells us that most of the training signal is coming from the knowledgedistillation term
+ Let’s update our trainer with these values and run the final training run
+Remarkably we’ve been able to train the student to match the accuracy of the teacher, despitehaving almost half the number of parameters! Let’s save the model for future use,As expected, the model size and latency remain essentially unchanged compared to theDistilBERT benchmark, but the accuracy has improved and even surpassed the performance ofthe teacher! We can actually compress our distilled model even further using a techniqueknown as quantization
+ That’s the topic for the next section
+Making Models Faster with QuantizationWe’ve now seen that with knowledge distillation we can reduce the computational and memorycost of running inference by transferring the information from a teacher into a smaller student
+Quantization takes a different approach; instead of reducing the number of computations, itmakes them much more efficient by representing the weights and activations with lowprecision data types like 8-bit integer (INT8) instead of the usual 32-bit floating-point (FP32)
+By reducing the number of bits, the resulting model requires less memory storage, andoperations like matrix multiplication can be performed much faster with integer arithmetic
+Remarkably, these performance gains can be realized with little to no loss in accuracy!A PRIMER ON FLOATING-POINT AND FIXED-POINT NUMBERSMost Transformers today are pretrained and fine-tuned with floating-point numbers(usually FP32 or a mix of FP16 and FP32) since they provide the precision needed toaccommodate the very different ranges of weights, activations and gradients
+ As illustratedin Figure 5-7, a floating-point number like FP32 represents a sequence of 32 bits that aregrouped in terms of a sign, exponent, and significand
+11 The sign determines whether thenumber is positive or negative, while the significand corresponds to the number ofsignificant digits, which are scaled using the exponent in some fixed base (usually two forbinary or ten for decimal)
+Figure 5-7
+ Comparison of the floating-point and fixed-point formats
+ Image from Enhancing the Implementation ofMathematical Formulas for Fixed-Point and Floating-Point Arithmetics by M
+ Martel
+However, once a model is trained, we only need the forward pass to run inference so wecan reduce the precision of the data types without impacting the accuracy too much
+ So what does it mean to quantize the weights or activations of a neural network? The basic ideais that we can “discretize” the floating-point values f in each tensor by mapping their rangeinto a smaller on of fixed-point numbers q, and linearly distributing allvalues in between
+ Mathematically, this mapping is described by the following equationwhere the scale factor S is a positive floating-point number and the constant Z has the sametype as q and is called the zero-point because it corresponds to the quantized value of thefloating-point value f = 0
+ Note that the map needs to be affine13 so that we get back floatingpoint numbers when we dequantize the fixed-point ones
+ An illustration of the conversion isshown in Figure 5-8
+Figure 5-8
+ Quantizing floating-point numbers as unsigned 8-bit integers (courtesy of Manas Sahni)
+Now, one of the main reasons why Transformers (and deep neural networks more generally) areprime candidates for quantization is that the weights and activations tend to take values inrelatively small ranges
+ This means we don’t have to squeeze the whole range of possible FP32numbers into, say, the 2 = 256 numbers represented by INT8
+ To see this, let’s pick out one ofthe attention weight matrices from our BERT-base model and plot the frequency distribution ofthe values:As we can see, the values of the weights are uniformly distributed in the small range around zero
+Now, suppose we want to quantize this tensor as a signed 8-bit integer
+In that case, the range of possible values for our integers i] so thezero-point coincides with the zero of FP32 and the scale factor is calculated according to theprevious equation:To obtain the quantized tensor, we just need to invert the mapping q = f /S + Z , clamp thevalues, round them to the nearest integer, and represent the result in the torch
+int8 dataGreat, we’ve just quantized our first tensor! In PyTorch we can simplify the conversion byusing the quantize_per_tensor function together with a quantized data typetorch
+qint that is optimized for integer arithmetic operations:If we dequantize this tensor, we can visualize the frequency distribution to see the effect thatrounding has had on our original values:This shows very clearly the discretization that’s induced by only mapping some of the weightvalues precisely and rounding the rest
+ To round out our little analysis, let’s compare how longit takes to compute the multiplication of two weight tensors with FP32 and INT8 values
+For the quantized tensors we need the QFunctional wrapper class so that we can performoperations with the special torch
+qint8 data type:from torch
+nn
+quantized import QFunctionalThis class supports various elementary operations like addition and in our case we can time themultiplication of our quantized tensors as follows:Compared to our FP32 computation, using the INT8 tensors is almost 100 times faster! Evenlarger gains can be obtained by using dedicated backends for running quantized operatorsefficiently, and as of this book’s writing PyTorch supports:x86 CPUs with AVX2 support or higherARM CPUs (typically found in mobile/embedded devices)Since INT8 numbers have four times less bits than FP32, quantization also reduces the memorystorage by up to a factor of four
+ In our simple example we can verify this by comparing theunderlying storage size of our weight tensor and quantized cousin by using theTensor
+storage function and the getsizeof function from Python’s sys module:For a full-scale Transformer, the actual compression rate depends on which layers are quantizedand as we’ll see in the next section it is only the linear layers that typically get quantized
+So what’s the catch with quantization? Changing the precision for all computations in ourmodel introduces small disturbances at each point in the model’s computational graph whichcan compound and affect the model’s performance
+ There are several ways to quantize a modelwhich all have pros and cons
+ In the following section we will briefly introduce them
+Quantization StrategiesDynamic QuantizationWhen using dynamic quantization nothing is changed during training and the adaptations areonly performed during inference
+ Like all quantization methods we will discuss, the weights ofthe model are converted to INT8 ahead of inference time
+ In addition to the weights, themodel’s activations are also quantized
+ The reason this approach is dynamic is because thequantization happens on-the-fly
+ This means that all the matrix multiplications can becalculated with highly optimized INT8 functions
+ Of all the quantization methods discussedhere, dynamic quantization is the simplest one
+ However, with dynamic quantization theactivations are written and read to memory in floating-point format
+ This conversion betweeninteger- and floating-point format can be a performance bottleneck
+ The next section discussesa method that addresses this issue
+Static QuantizationInstead of computing the quantization of the activations on the fly, one could save theconversion to floating-point if the quantization scheme of the activations were pre-computed
+Static quantization achieves this by observing the activations patterns on a representativesample of the data ahead of inference time
+ The ideal quantization scheme is calculated andthen saved
+ This enables us to skip the conversion between INT8 and FP32 values and producesan additional speed-up of the computations
+ However, this requires access to a good datasample and introduces an additional step in the pipeline, since we now need to train anddetermine the quantization scheme before we can perform inference
+ There is one aspect thatalso static quantization does not address and this is the discrepancy between the precisionduring training and inference which leads to a performance drop in the model’s metrics(e
+g
+ accuracy)
+ This can be improved by adapting the training loop as discussed in the nextsection
+Quantization Aware TrainingThe affect of quantization can be effectively simulated during training by “fake” quantizationof the FP32 values
+ Instead of using INT8 during training the FP32 values are rounded tomimic the effect of quantization
+ This is done during both the forward and backward pass andimproves performance in terms of model metrics over static and dynamic quantization
+Quantizing Transformers in PyTorchThe main bottleneck for running inference with Transformers is the compute and memorybandwidth associated with the enormous number of weights in these models
+ For this reason,dynamic quantization is currently the best approach for Transformer-based models in NLP
+ Insmaller computer vision models the limiting factor is the memory bandwidth of the activationswhich is why static quantization is generally used and quantization aware training in caseswhere the performance drops are too significant
+Implementing dynamic quantization in PyTorch is quite simple and can be done with a singleline of code:Here we pass to quantize_dynamic the full-precision model and specify the set ofPyTorch layer classes in that model that we want to quantize
+ The dtype argument specifiesthe target precision and can be fp16 or qint8
+Wow, the quantized model is almost half the size of our distilled one and twice as fast! Let’s seeif we can push our optimization to the limit with a powerful framework called ONNX
+Optimizing Inference with ONNX and the ONNX RuntimeONNX is an open standard that defines a common set of operators and a common file format torepresent deep learning models in a wide variety of frameworks, including PyTorch andTensorFlow
+14 When a model is exported to the ONNX format, these operators are used toconstruct a computational graph (often called an intermediate representation) which representsthe flow of data through the neural network
+ An example of such a graph for BERT-base isshown in Figure 5-9, where each node receives some input, applies an operation like “Add” or“Squeeze”, and then feeds the output to the next set of nodes
+Figure 5-9
+ A section of the ONNX graph for BERT-base, visualized in NetronBy exposing a graph with standardized operators and data types, ONNX makes it easy toswitch between frameworks
+ For example, a model trained in PyTorch can be exported toONNX format and then imported in TensorFlow (and vice versa)
+Where ONNX really shines is when it is coupled with a dedicated accelerator like the ONNXRuntime, or ORT for short
+ ORT provides tools to optimize the ONNX graph throughtechniques like operator fusion and constant folding,15 and defines an interface to ExecutionProviders that allow you to run the model on different types of hardware
+ This is a powerfulabstraction and Figure 5-10 shows the high-level architecture for the ONNX and ORTecosystem
+Figure 5-10
+ Architecture of the ONNX and ONNX Runtime ecosystem (courtesy of the ONNX Runtime team)To see ORT in action, the first thing we need to do is convert our distilled model into theONNX format
+ Transformers has an in-built function calledconvert_graph_to_onnx
+convert that simplifies the process by doing the followingsteps:Initializes the model as a PipelineRuns dummy inputs through the pipeline so that ONNX can record the computationalgraphDefines dynamic axes to handle dynamic sequence lengthsSaves the graph with network parametersNext, let’s convert our distilled model to the ONNX format
+ Here we need to specify theargument pipeline_name="sentiment-analysis" since convert wraps the modelin a Transformers pipeline during the conversion
+ We use the sentiment-analysisargument since this is the name of the text classification pipeline in Transformers
+ In addition tothe model_ckpt we also pass the tokenizer to initialize the pipeline:ONNX uses operator sets to group together immutable operator specifications, so opset=12corresponds to a specific version of the ONNX library
+Now that we have our model saved, we need to create and inference session to feed inputs tothe model:Let’s test this out with an example from the test set
+ Since the output from the convertfunction tells us that ONNX expects just the input_ids and attention_mask as inputs,we need to drop the label column from our sample
+As expected, by specifying the sentiment-analysis pipeline name we get the class logitsas the output so we can easily get the predicted label by taking the argmax
+Since we cannot use the TextClassificationPipeline class to wrap our ONNXmodel, we’ll create our own class that mimics the core behaviour:Great, our pipeline works well so the next step is to create a performance benchmark forONNX models
+ Here we can build on the work we did with the PerformanceBenchmarkclass by simply overriding the compute_size function and leaving thecompute_accuracy and time_pipeline functions intact
+ With our new benchmark, let’s see how our distilled model performs when converted to ONNXformat:Remarkably, converting to the ONNX format and using the ONNX runtime has more thanhalved the average latency of our distilled model (and is almost five times faster than ourbaseline)! Let’s see if we can squeeze a bit more performance by applying some Transformerspecific optimizations
+Optimizing for Transformer ArchitecturesWe’ve just seen that the ONNX Runtime was very good at optimizing our distilled model outof the box
+ However, the ONNX Runtime library also offers an optimizer module thatcontains some Transformer-specific optimizations that we can try to see if the model is fullyoptimized or not
+ To use the optimizer module we first need to define some optimizationoptions that are specific to our model
+Here we’ve disabled the norm optimization on the embedding layer to get better model sizecompression
+ Now that we’ve specified the model options, we can then runoptimizer
+Here we’ve specified the number of heads and hidden size in our DistilBERT model
+ The lastthing to do is create an inference session for our optimized model, wrap it in a pipeline and runit through our benchmark:Okay, it seems that our original ORT optimization was already close to the optimal one for thisarchitecture
+ Let’s now see what happens if we add quantization to the mix
+ Similar to PyTorch,ORT offers three ways to quantize a model: dynamic, static, and quantization aware training
+As we did with PyTorch, we’ll apply dynamic quantization to our distilled model
+ In ORT, thequantization is applied through the quantize_dynamic function which requires a path tothe ONNX model to quantize, a target path to save the quantized model to, and the data type toreduce the weights to:Wow, ORT quantization has reduced the model size and latency by around a factor of twocompared to the model obtained from PyTorch quantization (the Distillation + quantizationblob)
+ One reason for this is that PyTorch only optimizes the nn
+Linear modules, whileONNX quantizes the embedding layer as well
+ From the plot we can also see that applyingORT quantization to our distilled model has provided an almost 7-fold gain compared to ourBERT baseline!This concludes our analysis of techniques to speed-up Transformers for inference
+ We haveseen that methods such as quantization reduce the model size by reducing the precision of therepresentation
+ Another strategy to reduce the size is to remove some weights altogether - thistechnique is called weight pruning and is the focus of the next section
+Making Models Sparser with Weight PruningSo far we’ve seen that knowledge distillation and weight quantization are quite effective atproducing faster models for inference, but in some cases you might also have strong constraintson the memory footprint of your model
+ For example, if your product manager suddenlydecides that the text-assistant needs to be deployed on a mobile device then we’ll need ourintent classifier to take up as little storage space as possible
+ To round out our survey ofcompression methods, let’s take a look at how we can shrink the number of parameters in ourmodel by identifying and removing the least important weights in the network
+Sparsity in Deep Neural NetworksAs shown in Figure 5-11, the main idea behind pruning is to gradually remove weightconnections (and potentially neurons) during training such that the model becomesprogressively sparser
+ The resulting pruned model has a smaller number of non-zero parameterswhich can then be stored in a compact sparse matrix format
+ Pruning can be also combinedwith quantization to obtain further compression
+Figure 5-11
+ Weights and neurons before and after pruning
+Weight Pruning MethodsMathematically, the way most weight pruning methods work is to calculate a matrix S ∈ Rof importance scores and then select the top-k percent of weights by importance:In effect, k acts as a new hyperparameter to control the amount of sparsity in the model, that isthe proportion of weights that are zero-valued
+ Lower values of k correspond to sparsermatrices
+As discussed in the tongue-in-cheek Optimal Brain Surgeon paper16, at the heart of eachpruning method are a set of questions that need to be considered:Which weights should be eliminated?How should the remaining weights be adjusted for best performance?How can such network pruning be done in a computationally efficient way?The answers to these questions inform how the score matrix S is computed, so let’s begin bylooking at one of the earliest and most popular pruning methods: magnitude pruning
+Magnitude PruningAs the name suggests, magnitude pruning calculates the scores according to the magnitude ofthe weightsand then derives the masks from M = Top (S)
+ In theliterature it is common to apply magnitude pruning in an iterative fashion17 by first training themodel to learn which connections are important and pruning the weights of least importance
+The sparse model is then re-trained and the process repeated until the desired sparsity isreached
+One drawback with this approach is that it is computationally demanding: at every step ofpruning we need to train the model to convergence
+ For this reason it is generally better togradually increase the initial sparsity s (which is usually zero) to a final value s after somenumber of stepsHere the idea is to update the binary masks M every Δt steps to allow masked weights toreactivate during training and recover from any potential loss in accuracy that is induced by thepruning process
+ As shown in Figure 5-12, the cubic factor implies that the rate of weightpruning is highest in the early phases (when the number of redundant weights is large) andgradually tapers off
+Figure 5-12
+ The cubic sparsity scheduler used for pruning
+One problem with magnitude pruning is that it is really designed for pure supervised learning,where the importance of each weight is directly related to the task at hand
+ By contrast, intransfer learning the importance of the weights is primarily determined by the pretrainingphase, so magnitude pruning can remove connections that are important for the fine-tuningtask
+ Recently, an adaptive approach19 called movement pruning has been proposed by theHuggingFace team - let’s take a look
+Movement PruningThe basic idea behind movement pruning is to gradually remove weights during fine-tuningsuch that the model becomes progressively sparser
+ The key novelty is that both the weightsand the scores are learned during fine-tuning
+ So instead of deriving the scores directly fromthe weights (like magnitude pruning does), the scores in movement pruning are arbitrary, andlearned through gradient descent like any other neural network parameter
+ This implies that inthe backward pass, we also track the gradient of the loss L with respect to the scores S 
+ Wecan calculate the gradient from the expression of the activations a as follows:Once the scores are learned, it is then straightforward to generate the binary mask usingM = Top (S)
+ There is also a “soft” version of movement pruning where instead of pickingthe top of weights, one uses a global threshold τ to define the binary maskThe intuition behind movement pruning is that the weights which are “moving” the most fromzero are the most important ones to keep
+ To see this, we first note that the gradient of L withrespect to the weights W is given bySince the scores are increasing when the gradient ∂L/∂S is negative, we see that this occursunder two scenarios (we can drop M since it’s a positive matrix):In other words, the positive weights increase during fine-tuning and vice versa for the negativeweights which is equivalent to saying that the scores increase as the weights move away fromzero
+ As shown in Figure 5-13, this behavior differs from magnitude pruning which selects asthe most important weights those which a furthest from zero
+Figure 5-13
+ Comparison of weights removed (in grey) during magnitude pruning (left) and movement pruning (right)
+These differences between the two pruning methods are also evident in the distribution of theremaining weights
+ As shown in Figure 5-14, magnitude pruning produces two clusters ofweights, while movement pruning produces a smoother distribution
+Figure 5-14
+ Distribution of remaining weights for magnitude pruning (MaP) and movement pruning (MvP)In this chapter we’ll examine how well movement pruning works with a top-k scorer on ourintent classifier
+ As of this book’s writing, Transformers does not support pruning methods “outof the box”, so we’ll have to implement the main classes ourselves
+ Fortunately, the code usedto produce the results from the movement pruning paper is available in the examples/research_projects/movement-pruning folder of the Transformers repository, so we have a greatfoundation to work from
+ Let’s get started!Creating Masked TransformersTo implement movement pruning, we’ll need a few different ingredients:A Top operator that we can use to binarize the scores by selecting the top-k% ofweights
+A way to apply the adaptive masking on-the-fly to our BERT-base model
+A cubic sparsity scheduler
+Let’s start by implementing the Top binarizer
+ From the definition, we need to calculate abinary mask matrix M from a real-valued matrix S if and only if S is among the k% highestvalues of S
+ Since the back-propagated gradients will flow through the binary mask, we’ll usethe autograd
+Function from PyTorch to compute the mask on the forward pass andautomatically calculate the gradients in the backward pass:Great, this makes sense since the entries in the top row of scores are the ones with thehighest value
+ Okay, so now that we have a way to binarize the scores, the next step is toimplement a fully connected layer that can calculate the binary mask on-the-fly and multiplythis by the weight matrix and inputs
+ As of this book’s writing, there is no simple way to do thisbeyond extending the various BERT classes in Transformers
+ We refer the reader to theimplementation in the Transformers repository, but note that the main ingredient is areplacement of all nn
+Linear layers with a new layer that computes the mask on the forwardpass:This new linear layer can then be used to build up a custom MaskedBertModel,MaskedBertForSequenceClassification and so on by allowing the thresholdparameter to be passed along with the inputs
+ We won’t show the explicit code here but referthe reader to the examples/research_projects/movement-pruning folder of the Transformersrepository
+ These new masked classes work in the same way the ordinary ones, so let’s load theconfiguration and model_init so we can do multiple fine-pruning runs:Creating a Pruning TrainerNow that we have our masked model, the next step is to implement a custom trainer that wecan use for fine-pruning
+ Similar to knowledge distillation, we’ll need a few ingredients:New hyperparameters like the amount of sparsity to start and end with during thetraining run
+ We’ll also need to specify what fraction of steps we use for warmup andcool down which are important
+A way to optimize the new learning rate for the scores
+A custom loss that can calculate the threshold at each step and feed that to the modelto generate the loss
+The new training arguments are simple to include, and again we just subclassTrainingArguments:The following function implements this logic
+In addition to the usual inputs, the masked model expects the sparsity threshold produced fromthe sparsity scheduler
+ A simple way to provide this information is to overwrite thecompute_loss function of the Trainer and extract the threshold at each training step:As noted earlier a key property of movement pruning is that the scores are learned during finetuning
+ This means that we need to instruct the Trainer to optimize for the usual weights andthese new score parameters
+ The way this is done in practice is to overwrite theNow that we’ve created out trainer it’s time to give it a spin!Fine-Pruning With Increasing SparsityTo evaluate the effect of pruning we’ll fine-tune BERT-base on our dataset at increasing levelsof sparsity
+ We expect some accuracy drop compared to the 94
+3% that the unpruned modelachieves, but hopefully it is not too much
+ First we need to define the base training argumentsfor our runs:Next, we’ll gradually decrease the threshold parameter in our mask which is equivalent toincreasing the sparsity of the weights
+ Since Transformers are quite robust to sparsity withmovement pruning, we’ll start by retaining 30% of the weights and decrease down to 1%
+ Thefollowing loop implements the sparsity increase by updating the training arguments andvalidation set with the current threshold value, fine-tuning and then saving the models andaccuracies for further analysis:As shown in Figure 5-15, we can see that pruning only has a small impact on accuracy and onlystarts to degrade once we start pruning more than 95% of the weights!Figure 5-15
+ Effect of removing weights on BERT-base’s accuracySince the best performing model appears to have around 5% of the weights, let’s use this one tocount the true number of remaining values and convert the model into a format suitable fornative model classes in Transformers
+Counting the Number of Pruned WeightsNow that we’ve pruned a model, let’s do a sanity check to count the number of parameterswe’ve removed
+To count the number of pruned weights, we’ll iterate throught the dictionary and count thenumber of elements in every layer that was masked with a layer_name
+mask_scoresand calculate the sparsity from this relative to the other layers
+ Since we’ve only pruned thetrainable parameters of the model we’ll exclude the embedding parameters from the count, sowe arrive at the following code:NOTEMovement pruning only eliminates weights in the encoder or decoder stack and task specific head
+ In particular,the embedding modules are frozen during fine-pruning so the total number of parameters in a fine-pruned model islarger than simply counting the remaining weights
+Pruning Once and For AllNow that we’re confident that we’ve pruned the model as expected, the final step is convert themodel back into a form that is suitable for the standardBertForSequenceClassification class
+ Here we need to collect all the dense tensorsand apply the mask to those which have been marked with the mask_scores name
+ Theresulting state_dict can then be saved along with the configuration and tokenizer from ourfine-pruned model:Looking at the at the benchmark you might be surprised: the pruned model is neither smallernor faster! The reason is that we stored weights as dense matrices which occupy the same spaceirrespective of how many values are set to zero
+ Similarly a matrix multiplication does not getfaster if more values are zero
+ Unfortunately, modern frameworks still lack fast sparseoperations and hence it is hard to get a speedup from pruning
+ However, we can store thematrices in a more compact format which we will explore in the next section
+Quantizing and Storing in Sparse FormatAs of this book’s writing, pruning in PyTorch or TensorFlow does not lead to improvedinferences times or a reduced model size since a dense tensor filled with zeroes is still dense
+However, when combined with compression algorithms like gzip, pruning does allow us toreduce the size of the model on disk
+ To get the most amount of compression, we’ll first applyquantization to our pruned model:The CSR RepresentationGreat, so naive quantization has reduced our dense model with 418 MB down to 173 MB
+ Toget further compression we can convert the sparse quantized tensors in our model into theCompressed Sparse Row (CSR) representation
+ In this representation, a sparse matrix isrepresented by the row and column indices of the non-zero values
+ Since the other values arezero in sparse matrix, we do not need to keep track of their locations which can be inferredfrom the non-zero indices
+ The CSR representation is commonly used in machine learningbecause it provides better support for matrix operations than other compressed formats
+ Todeepen our intuition, let’s create a sparse matrix by masking most of the elements in a denseone:As expected, we see that each non-zero value is associated with a (row, column) tuplewhich for large sparse matrices provides a dramatic reduction in memory
+ Now what we can dois apply this compression to the sparse quantized tensors in our fine-pruned model
+ To see this,let’s get the first quantized tensor in our stateThe final check is to see how much space we’ve save using the CSR format
+ We can usetorch
+save and the Linux du command to get the result:Nice, together with fine-pruning, quantization and the CSR format we have managed to reducethe storage space of our original model from 418 MB to 110 MB! This could be furtheroptimized with the ONNX format, but we leave this as an exercise for the reader
+ConclusionWe’ve seen that optimizing Transformers for deployment in production environments involvescompression along two dimensions: latency and memory footprint
+ Starting from a fine-tunedmodel we applied distillation, quantization, and optimizations through ORT to reduce thelatency and memory by 7 fold
+ In particular, we found that quantization and conversion in ORTgave the largest gains with minimal effort
+Although pruning is an effective strategy for reducing the storage size of Transformer models,current hardware is not optimized for sparse matrix operations which limits the usefulness ofthis technique
+ However, this is an active and rapid area of research and by the time this bookhits the shelves many of these limitations may have been resolved
+So where to from here? All of the techniques in this chapter can be adapted to other tasks suchas question answering, named entity recognition, or language modeling
+ If you find yourselfstruggling to meet the latency requirements or your model is eating up all your compute budgetwe suggest giving one of these techniques a try
