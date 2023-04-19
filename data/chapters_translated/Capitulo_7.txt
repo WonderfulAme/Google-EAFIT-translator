@@ -1,0 +1,1340 @@
+Capítulo 7.
+Tratar con pocos para
+Sin etiquetas
+UNA NOTA PARA LOS LECTORES DE SALIDA TEMPRANA
+Con los libros electrónicos Early Release, obtiene libros en su forma más antigua: el
+el contenido sin editar y sin editar del autor a medida que escribe, para que pueda tomar
+ventaja de estas tecnologías mucho antes del lanzamiento oficial de estos
+títulos
+Este será el capítulo 7 del libro final.
+Tenga en cuenta que el
+El repositorio de GitHub se activará más adelante.
+Si tiene comentarios sobre cómo podríamos mejorar el contenido y/o
+ejemplos en este libro, o si nota que falta material dentro de este
+capítulo, comuníquese con el editor en mpotter@oreilly.
+com.
+Hay una pregunta tan profundamente arraigada en la mente de cada científico de datos
+que suele ser lo primero que preguntan al comienzo de un nuevo proyecto: ¿hay
+algún dato etiquetado? La mayoría de las veces, la respuesta es "no" o "un poco",
+seguido por una expectativa del cliente de que la máquina elegante de su equipo
+los modelos de aprendizaje aún deberían funcionar bien.
+Dado que los modelos de entrenamiento en muy
+pequeños conjuntos de datos no suelen dar buenos resultados, una solución obvia es
+para anotar más datos.
+Sin embargo, esto lleva tiempo y puede ser muy costoso,
+especialmente si cada anotación requiere experiencia en el dominio para validar.
+Afortunadamente, existen varios métodos que son muy adecuados para tratar con
+pocas o ninguna etiqueta! Es posible que ya esté familiarizado con algunos de ellos, como
+Aprendizaje de tiro cero o pocos tiros de la impresionante capacidad de GPT-3 para realizar un
+amplia gama de tareas a partir de unas pocas docenas de ejemplos.
+En general, el mejor método dependerá de la tarea, la cantidad
+de datos disponibles y qué fracción está etiquetada.
+Un árbol de decisión se muestra en
+
+Figura 7-1 para ayudarnos a guiarnos a través del proceso.
+Figura 7-1.
+Varias técnicas que se pueden utilizar para mejorar el rendimiento del modelo en ausencia de
+grandes cantidades de datos etiquetados.
+Repasemos este árbol de decisiones paso a paso:
+¿Tienes datos etiquetados?
+Incluso un puñado de muestras etiquetadas puede marcar la diferencia en cuanto a qué
+método funciona mejor.
+Si no tiene ningún dato etiquetado, puede comenzar con
+el enfoque de aprendizaje de tiro cero en la SECCIÓN X, que a menudo establece un
+línea de base fuerte para trabajar.
+¿Cuántas etiquetas?
+Si los datos etiquetados están disponibles, el factor decisivo es ¿cuánto? Si usted
+tiene muchos datos de entrenamiento disponibles, puede usar el ajuste fino estándar
+enfoque discutido en el Capítulo 2.
+¿Tienes datos sin etiquetar?
+Si solo tiene un puñado de muestras etiquetadas, puede ser de gran ayuda si
+tiene acceso a grandes cantidades de datos sin etiquetar.
+Si tienes acceso
+a los datos sin etiquetar, puede usarlos para ajustar el modelo de lenguaje
+en el dominio antes de entrenar un clasificador o puede usar más
+métodos sofisticados como Universal Data Augmentation (UDA)1 o
+
+Autoformación consciente de la incertidumbre (UST)2.
+Si tampoco tienes
+datos sin etiquetar disponibles, significa que ni siquiera puede anotar más
+datos si quisieras.
+En este caso, puede usar el aprendizaje de pocos disparos o usar
+las incrustaciones de un modelo de lenguaje preentrenado para realizar búsquedas
+con una búsqueda de vecino más cercano.
+En este capítulo, nos abriremos camino a través de este árbol de decisiones abordando un
+problema común que enfrentan muchos equipos de soporte que usan rastreadores de problemas como
+Jira o GitHub para ayudar a sus usuarios: problemas de etiquetado con metadatos basados ​​en
+la descripción del problema.
+Estas etiquetas pueden definir el tipo de problema, el producto
+causando el problema, o qué equipo es responsable de manejar el informe
+asunto.
+Automatizar este proceso puede tener un gran impacto en la productividad y
+permite que los equipos de soporte se centren en ayudar a sus usuarios.
+como correr
+ejemplo, usaremos los problemas de GitHub asociados con un código abierto popular
+proyecto: Transformadores de Caras Abrazadas! Ahora echemos un vistazo a lo que
+información está contenida en estos temas, cómo enmarcar la tarea y cómo
+obtener los datos
+NOTA
+Los métodos presentados en este capítulo funcionan bien para la clasificación de textos, pero otros
+técnicas como el aumento de datos pueden ser necesarias para abordar tareas más complejas
+como reconocimiento de entidad nombrada, respuesta a preguntas o resumen.
+Creación de un etiquetador de problemas de GitHub
+Si navega a la pestaña Problemas del repositorio de Transformers, encontrará
+problemas como el que se muestra en la Figura 7-2, que contiene un título, descripción,
+y un conjunto de etiquetas o rótulos que caracterizan el problema.
+Esto sugiere una naturaleza
+manera de enmarcar la tarea de aprendizaje supervisado: dado un título y una descripción de
+un problema, predecir una o más etiquetas.
+Dado que a cada problema se le puede asignar un
+número variable de etiquetas, esto significa que estamos ante un texto multietiqueta
+problema de clasificacion
+Este problema suele ser más desafiante que el
+
+configuración multiclase que encontramos en el Capítulo 2, donde cada tweet fue
+asignado a una sola emoción.
+Figura 7-2.
+Un problema típico de GitHub en el repositorio de Transformers.
+Ahora que hemos visto cómo se ven los problemas de GitHub, veamos cómo
+podemos descargarlos para crear nuestro conjunto de datos.
+Obtener los datos
+Para capturar todos los problemas del repositorio, usaremos la API REST de GitHub para sondear
+el punto final Problemas.
+Este punto final devuelve una lista de objetos JSON, donde
+cada elemento contiene una gran cantidad de campos sobre el problema, incluido su
+estado (abierto o cerrado), quién abrió el problema, así como el título, cuerpo y
+etiquetas que vimos en la Figura 7-2.
+Para sondear el punto final, puede ejecutar lo siguiente
+comando curl para descargar el primer número en la primera página:
+
+Dado que lleva un tiempo obtener todos los problemas, hemos incluido un problema.
+jsonl
+en el repositorio de GitHub de este libro, junto con fetch_issues
+función para descargarlos usted mismo.
+NOTA
+La API REST de GitHub trata las solicitudes de extracción como problemas, por lo que nuestro conjunto de datos contiene una combinación de
+ambos.
+Para simplificar las cosas, desarrollaremos nuestro clasificador para ambos tipos de problemas,
+aunque en la práctica podría considerar construir dos clasificadores separados para tener más
+control detallado sobre el rendimiento del modelo.
+Preparación de los datos
+Una vez que hayamos descargado todos los números, podemos cargarlos usando Pandas:
+importar pandas como
+
+Hay casi 10,000 problemas en nuestro conjunto de datos y mirando una sola fila
+podemos ver que la información recuperada de la API de GitHub contiene
+muchos campos como URL, ID, fechas, usuarios, título, cuerpo y etiquetas:
+
+
+
+
+Las columnas de etiquetas son lo que nos interesa, y cada fila
+contiene una lista de objetos JSON con metadatos sobre cada etiqueta:
+
+Para nuestros propósitos, solo nos interesa el campo de nombre de cada etiqueta.
+objeto, así que sobreescribamos la columna de etiquetas solo con los nombres de las etiquetas:
+
+
+
+A continuación, echemos un vistazo a las 10 etiquetas más frecuentes en el conjunto de datos.
+En
+Pandas, podemos hacer esto "explotando" la columna de etiquetas para que cada
+etiqueta en la lista se convierte en una fila, y luego simplemente contamos la ocurrencia de
+cada etiqueta:
+
+Podemos ver que hay 65 etiquetas únicas en el conjunto de datos y que las clases
+están muy desequilibrados, siendo wontfix y model card los más
+etiquetas comunes.
+Para hacer el problema de clasificación más manejable, vamos a
+concéntrese en crear un etiquetador para un subconjunto de las etiquetas.
+por ejemplo, algunos
+etiquetas como Good First Issue o Help Wanted son potencialmente
+muy difícil de predecir a partir de la descripción del problema, mientras que otros como
+la tarjeta modelo podría clasificarse con una regla simple que detecta cuando un
+la tarjeta modelo se agrega en el Hugging Face Hub.
+El siguiente código muestra el subconjunto de etiquetas con las que trabajaremos, junto
+con una estandarización de los nombres para hacerlos más fáciles de leer:
+
+Ahora veamos la distribución de las nuevas etiquetas:
+tokenización
+nuevo modelo
+entrenamiento modelo
+uso
+tubería
+tensorflow o tf
+
+antorcha
+documentación
+ejemplos
+
+
+Dado que se pueden asignar múltiples etiquetas a un solo problema, también podemos ver
+la distribución de la etiqueta cuenta:
+
+
+La gran mayoría de los números no tienen ninguna etiqueta y solo unos pocos
+tener más de uno.
+Más adelante en este capítulo nos resultará útil tratar el
+problemas sin etiquetar como una división de capacitación separada, así que vamos a crear una nueva columna
+que indica si el problema está sin etiquetar o no:
+
+Veamos ahora un ejemplo:
+Google propuso recientemente una nueva
+
+En este ejemplo se propone un nuevo modelo de arquitectura, por lo que el nuevo modelo
+etiqueta tiene sentido.
+También podemos ver que el título contiene información que
+será útil para nuestro clasificador, así que concatenémoslo con el problema
+descripción en el campo del cuerpo:
+
+Como hemos hecho en otros capítulos, es una buena idea echar un vistazo rápido a la
+número de palabras en nuestros textos para ver si perdemos mucha información durante
+el paso de tokenización:
+
+La distribución tiene una cola larga característica de muchos conjuntos de datos de texto.
+Mayoría
+los textos son bastante cortos pero también hay ediciones con más de 1.000 palabras.
+Él
+es común tener temas muy largos, especialmente cuando los mensajes de error y
+fragmentos de código se publican junto con él.
+Creación de conjuntos de entrenamiento
+Ahora que hemos explorado y limpiado nuestro conjunto de datos, lo último que debe hacer es
+definir nuestros conjuntos de entrenamiento para comparar nuestros clasificadores.
+Queremos asegurarnos de que las divisiones estén equilibradas, lo cual es un poco más complicado para un
+problema multilabel porque no hay equilibrio garantizado para todas las etiquetas.
+Sin embargo, se puede aproximar, aunque scikit-learn no admite
+esto podemos usar la biblioteca scitkit-multilearn que está configurada para multilabel
+problemas.
+Lo primero que debemos hacer es transformar nuestro conjunto de etiquetas como
+pytorch y tokenización en un formato que el modelo pueda procesar.
+Aquí podemos usar el transformador MultiLabelBinarizer de Scikit-Learn
+class, que toma una lista de nombres de etiquetas y crea un vector con ceros para
+etiquetas ausentes y etiquetas presentes.
+Podemos probar esto ajustando
+MultiLabelBinarizer en all_labels para aprender el mapeo de
+nombre de la etiqueta a la identificación de la siguiente manera:
+
+En este sencillo ejemplo podemos ver que la primera fila tiene dos unos correspondientes
+a las etiquetas de tokenización y nuevo modelo, mientras que la segunda fila tiene
+solo un golpe con pytorch.
+Para crear las divisiones podemos usar iterative_train_test_split
+función que crea las divisiones de tren/prueba de forma iterativa para lograr un equilibrio
+etiquetas.
+Lo envolvemos en una función que podemos aplicar a DataFrames.
+Desde
+la función espera una matriz de características bidimensional, necesitamos agregar una
+dimensión a los posibles índices antes de realizar el split:
+
+
+Con esa función implementada, podemos dividir los datos en supervisados ​​y
+conjuntos de datos no supervisados ​​y crear conjuntos equilibrados de tren, validación y prueba para
+la parte supervisada:
+
+
+Finalmente, creemos un DatasetDict con todas las divisiones para que podamos
+tokenice fácilmente el conjunto de datos e integre con el Entrenador.
+Aquí usaremos
+el ingenioso conjunto de datos.
+función from_pandas de Datasets para cargar cada
+dividir directamente desde el Pandas DataFrame correspondiente:
+
+
+Esto se ve bien, por lo que lo último que debe hacer es crear algunos segmentos de entrenamiento para que
+que podemos evaluar el desempeño de cada clasificador en función de la
+Tamaño del conjunto de entrenamiento.
+Creación de segmentos de entrenamiento
+El conjunto de datos tiene las dos características que nos gustaría investigar en este
+capítulo: datos etiquetados dispersos y clasificación multilabel.
+el conjunto de entrenamiento
+consta de solo 220 ejemplos para entrenar con lo que sin duda es un reto
+incluso con transferencia de aprendizaje.
+Para profundizar en cómo cada método en este
+capítulo se realiza con pocos datos etiquetados, también crearemos porciones de la
+datos de entrenamiento con incluso menos muestras.
+Entonces podemos graficar el número de
+muestras contra el rendimiento e investigar varios regímenes.
+Bien
+Comience con solo 8 muestras por etiqueta y aumente hasta que la rebanada cubra el
+conjunto de entrenamiento completo usando la función iterative_train_test_split:
+
+Genial, finalmente hemos preparado nuestro conjunto de datos en divisiones de entrenamiento. A continuación, tomemos
+¡una mirada al entrenamiento de un modelo de referencia sólido!
+
+Implementando una bayeslina
+Cada vez que comienza un nuevo proyecto de PNL, siempre es una buena idea
+implementar un conjunto de líneas de base sólidas por dos razones principales:
+1.
+Una línea de base basada en expresiones regulares, reglas hechas a mano o un
+modelo muy simple ya podría funcionar muy bien para resolver el
+problema.
+En estos casos, no hay razón para sacar armas grandes.
+como transformadores que generalmente son más complejos de implementar y
+mantener en entornos de producción.
+2.
+Las líneas de base proporcionan controles de cordura a medida que explora más complejos
+modelos
+Por ejemplo, suponga que entrena BERT-grande y obtiene un
+precisión del 80% en su conjunto de validación.
+Podrías escribirlo como un
+conjunto de datos duros y llámalo un día.
+Pero, ¿y si supieras que un simple
+clasificador como la regresión logística obtiene el 95% de precisión? Eso podría
+levante sus sospechas y le solicite que depure su modelo.
+Entonces, comencemos nuestro análisis entrenando un modelo de referencia.
+para texto
+clasificación, una gran línea de base es un clasificador Naive Bayes, ya que es muy
+simple, rápido de entrenar y bastante robusto a las perturbaciones en las entradas.
+El
+La implementación de Scikit-Learn de Naive Bayes no admite etiquetas múltiples
+clasificación lista para usar, pero afortunadamente podemos usar nuevamente la biblioteca scitkitmultilearn para presentar el problema como una tarea de clasificación de uno contra el resto
+donde entrenamos L clasificadores binarios para L etiquetas.
+Primero, usemos multilabel
+binarizer para crear una nueva columna label_ids en nuestros conjuntos de entrenamiento.
+Aquí nosotros
+puede utilizar el conjunto de datos.
+función map para encargarse de todo el procesamiento en
+Uno va:
+
+Para medir el desempeño de nuestros clasificadores, usaremos el micro y
+puntajes macro F, donde el primero rastrea el rendimiento en el frecuente
+etiquetas y este último en todas las etiquetas sin tener en cuenta la frecuencia.
+Ya que estaremos
+evaluando cada modelo a través de divisiones de entrenamiento de diferentes tamaños, vamos a crear un
+defaultdict con una lista para almacenar las puntuaciones por división:
+1
+
+
+
+¡Ahora finalmente estamos listos para entrenar nuestra línea de base! Aquí está el código para entrenar el
+modele y evalúe nuestro clasificador a través de tamaños de conjuntos de entrenamiento crecientes:
+
+Están sucediendo muchas cosas en este bloque de código, así que vamos a descomprimirlo.
+Primero,
+obtenemos el segmento de entrenamiento y codificamos las etiquetas.
+Entonces usamos un conteo
+vectorizador para codificar los textos simplemente creando un vector del tamaño del
+vocabulario donde cada entrada corresponde a la frecuencia con la que apareció un token
+en el texto.
+Esto se denomina enfoque de bolsa de palabras ya que toda la información sobre
+se pierde el orden de las palabras.
+Luego entrenamos el clasificador y usamos el
+predicción en el conjunto de prueba para obtener las puntuaciones F micro y macro a través de la
+informe de clasificación.
+1
+
+Con la siguiente función auxiliar podemos trazar los resultados de este
+experimento:
+
+
+Tenga en cuenta que representamos el número de muestras en una escala logarítmica.
+Desde el
+En la figura podemos ver que el rendimiento en las puntuaciones F micro y macro
+mejora a medida que aumentamos el número de muestras de formación, pero más
+1
+
+dramáticamente con las micro puntuaciones, que se acercan a cerca del 50%
+precisión con el conjunto de entrenamiento completo.
+Con tan pocas muestras para entrenar, el
+los resultados también son ligeramente ruidosos ya que cada segmento puede tener una clase diferente
+distribución.
+Sin embargo, lo importante aquí es la tendencia, así que ahora
+¡Vea cómo les va a estos resultados frente a los enfoques basados ​​en transformadores!
+
+Trabajar sin datos etiquetados
+La primera técnica que consideraremos es la clasificación de tiro cero, que es
+adecuado en entornos donde no tiene datos etiquetados en absoluto.
+Esta configuración es
+sorprendentemente común en la industria, y puede ocurrir porque no hay
+datos históricos con etiquetas o adquirir las etiquetas para los datos es difícil de
+conseguir.
+Haremos un poco de trampa en esta sección ya que todavía usaremos los datos de prueba para
+medir el rendimiento, pero no utilizaremos ningún dato para entrenar el modelo.
+De lo contrario, la comparación con los siguientes enfoques sería difícil.
+Veamos ahora cómo funciona la clasificación de tiro cero.
+Clasificación de tiro cero
+El objetivo de la clasificación de tiro cero es hacer uso de un modelo preentrenado
+sin ningún ajuste adicional en el corpus específico de su tarea.
+Conseguir un
+una mejor idea de cómo podría funcionar esto, recuerde que los modelos de lenguaje como BERT
+están preentrenados para predecir tokens enmascarados en texto de miles de libros y
+grandes volcados de Wikipedia.
+Para predecir con éxito un token faltante, el modelo
+necesita ser consciente del tema en el contexto.
+Podemos intentar engañar al modelo.
+clasificar un documento para nosotros proporcionando una oración como:
+“Esta sección fue sobre el tema [MASCARILLA].
+”
+El modelo debe entonces dar una sugerencia razonable para el documento.
+topic ya que este es un texto natural que ocurre en el conjunto de datos.
+3
+Ilustremos esto más con el siguiente problema de juguete: supongamos que
+tengo dos hijos y a uno le gustan las peliculas con carros mientras que al otro
+disfruta más de las películas con animales.
+Desafortunadamente, ya han visto todo.
+los que conoce, por lo que desea crear una función que le indique qué tema
+
+se trata la nueva película.
+Naturalmente, recurre a los transformadores para esta tarea, por lo que el
+Lo primero que debe intentar es cargar BERT-base en la canalización de máscara de relleno que
+usa el modelo de lenguaje enmascarado para predecir el contenido del lenguaje enmascarado
+fichas:
+
+A continuación, construyamos una pequeña descripción de la película y agreguemos un aviso con un
+palabra enmascarada.
+El objetivo de la indicación es guiar al modelo para que nos ayude a hacer
+una clasificación.
+La canalización de máscara de relleno devuelve los tokens más probables a
+complete el lugar enmascarado:
+
+Claramente, el modelo predice solo tokens relacionados con animales.
+Podemos
+también cambie esto y, en lugar de obtener los tokens más probables, podamos
+consulta la canalización para conocer la probabilidad de algunos tokens dados.
+Para esta tarea nos
+podría elegir automóviles y animales para que podamos pasarlos a la tubería como
+objetivos:
+
+Como era de esperar, la probabilidad de los coches simbólicos es mucho menor que la de
+animales
+Veamos si esto también funciona para una descripción más cercana a los automóviles:
+
+¡Funcionó! Este es solo un ejemplo simple y si queremos asegurarnos de que
+funciona bien, deberíamos probarlo a fondo, pero ilustra la idea clave de
+muchos enfoques discutidos en este capítulo: encontrar una manera de adaptar un
+modelo para otra tarea sin entrenarlo.
+En este caso, configuramos un indicador
+con una máscara de manera que podamos usar un modelo de lenguaje enmascarado directamente para
+clasificación.
+Veamos si podemos hacerlo mejor adaptando un modelo que tiene
+ha sido perfeccionado en una tarea que está más cerca de la clasificación de texto: natural
+inferencia de lenguaje o NLI para abreviar.
+Secuestro de la inferencia del lenguaje natural
+Usar el modelo de lenguaje enmascarado para la clasificación es un buen truco, pero
+puede hacerlo mejor usando un modelo que ha sido entrenado en una tarea que es
+más cerca de la clasificación.
+Hay una tarea de proxy ordenada llamada implicación de texto que
+se puede usar para entrenar modelos solo para esta tarea.
+En la vinculación de texto, el modelo
+necesita determinar si es probable que dos pasajes de texto sigan o
+contradecirse entre sí.
+Con conjuntos de datos como el Multi-Genre NLI Corpus
+4 o su contraparte multilingüe, el Corpus Cross-Lingual NLI
+5 se entrena un modelo para detectar implicaciones y contradicciones.
+Cada muestra en este conjunto de datos se compone de tres partes: una premisa, una
+hipótesis, y una etiqueta donde la etiqueta puede ser una de "implicación",
+
+“neutro” y “contradictorio”.
+La etiqueta de “vinculación” se da cuando el
+el texto de la hipótesis es necesariamente verdadero bajo la premisa.
+La “contradicción”
+La etiqueta se usa cuando la hipótesis es necesariamente falsa o inapropiada bajo
+la premisa.
+Si ninguno de estos casos se aplica, entonces la etiqueta "neutral" es
+asignado.
+Consulte la figura Figura 7-3 para ver ejemplos del conjunto de datos.
+Figura 7-3.
+Tres ejemplos del conjunto de datos MNLI de tres dominios diferentes.
+Imagen de MNLI
+papel.
+Ahora resulta que podemos secuestrar un modelo entrenado en el conjunto de datos MNLI para
+¡construya un clasificador sin necesidad de etiquetas! La idea clave es tratar
+el texto que deseamos clasificar como premisa, y luego formular la
+hipótesis como
+“Este ejemplo es sobre {label}.
+”
+donde insertamos el nombre de la clase para la etiqueta.
+La puntuación de vinculación entonces dice
+nosotros qué tan probable es esa premisa sobre ese tema, y ​​podemos ejecutar esto para cualquier
+número de clases secuencialmente.
+La desventaja de esto es que necesitamos
+ejecutar un pase hacia adelante para cada clase, lo que lo hace menos eficiente que un
+clasificador estándar.
+Otro aspecto un poco complicado es que la elección de la etiqueta
+nombres pueden tener un gran impacto en la precisión, y elegir etiquetas con
+el significado semántico es generalmente el mejor enfoque.
+Por ejemplo, si una etiqueta es
+simplemente llamado "Clase 1", el modelo no tiene idea de lo que esto podría significar y
+si esto constituye una contradicción o una vinculación.
+La biblioteca de Transformers tiene un modelo MNLI para la clasificación de tiro cero
+incorporado
+Podemos inicializarlo a través de la API de canalización de la siguiente manera:
+
+El dispositivo de configuración = 0 se asegura de que el modelo se ejecute en la GPU en su lugar
+de la CPU predeterminada para acelerar la inferencia.
+Para clasificar un texto simplemente necesitamos
+para pasarlo a la canalización junto con los nombres de las etiquetas.
+Además podemos establecer
+multi_label=True para garantizar que se devuelvan todas las puntuaciones y no
+solo el máximo para la clasificación de una sola etiqueta:
+No solo
+> el título es emocionante:
+> Los sistemas NLP canalizados han sido reemplazados en gran medida por sistemas neuronales de extremo a extremo.
+> modelado, sin embargo, casi todos los modelos de uso común todavía requieren un
+explícito
+> paso de tokenización.
+Si bien los enfoques recientes de tokenización basados
+en datos derivados
+> los léxicos de subpalabras son menos frágiles que los creados manualmente
+tokenizadores, estos
+> las técnicas no se adaptan por igual a todos los idiomas, y la
+uso de cualquier fijo
+> el vocabulario puede limitar la capacidad de adaptación de un modelo.
+En esto
+papel, presentamos
+> CANINE, un codificador neural que opera directamente sobre el carácter
+secuencias,
+> sin tokenización o vocabulario explícitos, y una estrategia de preentrenamiento que
+> opera ya sea directamente en caracteres u opcionalmente usa
+
+subpalabras como un suave
+> sesgo inductivo.
+Para usar su entrada de grano más fino de manera efectiva y
+eficientemente,
+> CANINE combina reducción de resolución, lo que reduce la secuencia de entrada
+longitud, con un
+> pila de transformador profunda, que codifica el contexto.
+CANINO
+supera a un
+> modelo mBERT comparable por 2.
+8 F1 en TyDi QA, un desafío
+plurilingüe
+> Benchmark, a pesar de tener un 28 % menos de parámetros de modelo.
+Necesitamos mucho esta arquitectura en Transformers (subpalabra RIP
+tokenización)!
+El primer autor (Jonathan Clark) dijo en
+>
+> que el modelo y el código se lanzarán en abril
+:cara_de_fiesta:
+Estado de código abierto
+
+
+NOTA
+Como estamos usando un tokenizador de subpalabras, ¡incluso podemos pasar código al modelo! Desde el
+El conjunto de datos de preentrenamiento para la canalización de disparo cero probablemente contenga solo una pequeña fracción de código.
+fragmentos, la tokenización puede no ser muy eficiente, pero dado que el código también está compuesto
+de muchas palabras naturales esto no es un gran problema.
+Además, el bloque de código puede contener
+información importante como el marco (PyTorch o TensorFlow).
+Podemos ver que el modelo está muy seguro de que este texto trata sobre
+tokenización, pero también produce puntajes relativamente altos para las otras etiquetas.
+Un aspecto importante para la clasificación de tiro cero es el dominio que operamos
+en.
+Los textos que nos ocupan son muy técnicos y en su mayoría sobre
+codificación, lo que los hace bastante diferentes de la distribución del texto original
+en el conjunto de datos MNLI.
+Por lo tanto, no es de extrañar que este sea un desafío muy
+tarea para el modelo.
+Para algunos dominios, el modelo podría funcionar mucho mejor
+que otros, dependiendo de lo cerca que estén de los datos de entrenamiento.
+Escribamos una función que alimente un solo ejemplo a través del tiro cero
+tubería, y luego escale a todo el conjunto de validación ejecutando
+Conjunto de datos.
+mapa:
+
+
+Ahora que tenemos nuestros puntajes, el siguiente paso es determinar qué conjunto de
+se deben asignar etiquetas a cada ejemplo.
+Aquí hay algunas opciones que
+puede experimentar con:
+Defina un umbral y seleccione todas las etiquetas por encima del umbral.
+Elija las k etiquetas principales con las k puntuaciones más altas.
+Para ayudarnos a determinar qué método es el mejor, escribamos un get_preds
+función que aplica uno de los métodos para recuperar las predicciones:
+
+A continuación, escribamos una segunda función que devuelva el
+
+
+Armados con estas dos funciones, comencemos con el método top-k por
+aumentando k para varios valores y trazando las puntuaciones F micro y macro en el conjunto de validación:
+
+Del gráfico podemos ver que los mejores resultados se obtienen seleccionando el
+etiqueta con la puntuación más alta por ejemplo (top-1).
+Esto quizás no sea así
+sorprendente dado que la mayoría de los ejemplos en nuestros conjuntos de datos tienen solo una
+etiqueta.
+Ahora comparemos esto con establecer un umbral para que podamos
+predecir potencialmente más de una etiqueta por ejemplo:
+
+A este enfoque le va algo peor que a los primeros 1 resultados, pero podemos ver
+la compensación precisión/recuperación claramente en este gráfico.
+Si elegimos el
+umbral demasiado pequeño, entonces hay demasiadas predicciones que conducen a un bajo
+precisión.
+Si elegimos el umbral demasiado alto, apenas haremos nada
+predicciones que produce un recuerdo bajo.
+De la trama vemos que un
+valor umbral de alrededor de 0.
+8 encuentra el punto dulce entre los dos.
+Dado que el método top-1 funciona mejor, usemos esto para comparar zero-shot
+clasificación contra Naive Bayes en el conjunto de prueba:
+
+
+Al comparar la canalización de disparo cero con la línea de base, observamos dos cosas:
+1.
+Si tenemos menos de 50 muestras etiquetadas, la tubería de tiro cero
+supera fácilmente a la línea de base.
+2.
+Incluso por encima de 50 muestras, el rendimiento de la tubería de disparo cero
+es superior cuando se consideran las puntuaciones F micro y macro.
+Los resultados para micro F-score nos dicen que la línea de base funciona
+bien en la clase frecuente, mientras que la tubería de tiro cero sobresale en
+aquellos ya que no requiere ningún ejemplo para aprender.
+NOTA
+Es posible que notes una pequeña paradoja en esta sección: aunque hablamos de tratar con no
+etiquetas, todavía usamos el conjunto de validación y prueba.
+Los usamos para mostrar diferentes
+técnicas y hacer comparables los resultados entre ellas.
+Incluso en un caso de uso real
+Tiene sentido reunir un puñado de ejemplos etiquetados para realizar algunas evaluaciones rápidas.
+El
+punto importante es que no adaptamos los parámetros del modelo con los datos;
+en su lugar, simplemente adaptamos algunos hiperparámetros.
+Si le resulta difícil obtener buenos resultados en su propio conjunto de datos, aquí hay algunos
+cosas que puede hacer para mejorar la canalización de disparo cero:
+La forma en que funciona la canalización la hace muy sensible a los nombres de
+las etiquetas.
+Si los nombres no tienen mucho sentido o no son fáciles de
+conectado a los textos, es probable que la canalización funcione mal.
+Intente usar diferentes nombres o use varios nombres en paralelo
+y agregarlos en un paso adicional.
+Otra cosa que puedes mejorar es la forma de la hipótesis.
+Por
+por defecto es “hipótesis=Este es un ejemplo sobre \{}“, pero puedes
+pasar cualquier otro texto a la canalización.
+Dependiendo del caso de uso, este
+también podría mejorar el rendimiento.
+Pasemos ahora al régimen donde tenemos algunos ejemplos etiquetados que podemos
+utilizar para entrenar un modelo.
+Trabajar con algunas etiquetas
+En la mayoría de los proyectos de PNL, tendrá acceso al menos a algunos etiquetados
+ejemplos
+Las etiquetas pueden provenir directamente de un cliente o de una empresa cruzada
+equipo, o puede decidir simplemente sentarse y anotar algunos ejemplos
+tú mismo.
+Incluso para el enfoque anterior necesitábamos algunos etiquetados
+ejemplos para evaluar qué tan bien funciona el enfoque de disparo cero.
+En esto
+sección, veremos cómo podemos aprovechar mejor los pocos, preciosos
+ejemplos etiquetados que tenemos.
+Comencemos mirando una técnica conocida
+
+como aumento de datos que puede ayudar a multiplicar los pequeños datos etiquetados que
+tener.
+Aumento de datos
+Una forma simple pero efectiva de aumentar el rendimiento de los clasificadores de texto
+en pequeños conjuntos de datos es aplicar técnicas de aumento de datos para generar nuevos
+ejemplos de entrenamiento de los existentes.
+Esta es una estrategia común en
+visión por computadora, donde las imágenes se perturban aleatoriamente sin cambiar
+el significado de los datos (p.
+gramo.
+un gato ligeramente girado sigue siendo un gato).
+para texto,
+el aumento de datos es algo más complicado porque perturbar las palabras o
+los caracteres pueden cambiar completamente el significado.
+Por ejemplo, los dos
+preguntas "¿Son los elefantes más pesados ​​que los ratones?" y “¿Son los ratones más pesados ​​que
+elefantes? difieren en un intercambio de una sola palabra, pero tienen respuestas opuestas.
+Sin embargo, si el texto consta de más de unas pocas oraciones (como nuestro GitHub
+los problemas lo hacen), entonces el ruido introducido por este tipo de transformaciones
+generalmente preservan el significado de la etiqueta.
+En la práctica, hay dos tipos
+de técnicas de aumento de datos que se utilizan comúnmente:
+Traducción inversa
+Tome un texto en el idioma de origen, tradúzcalo a uno o más de destino
+idiomas usando la traducción automática, y luego traducir de nuevo al
+lenguaje fuente.
+La retrotraducción tiende a funcionar mejor para los usuarios de recursos elevados.
+lenguajes o corpus que no contienen demasiados dominios específicos
+palabras.
+Perturbaciones de tokens
+Dado un texto del conjunto de entrenamiento, elija al azar y realice simples
+transformaciones como reemplazo aleatorio de sinónimos, inserción de palabras,
+intercambio o eliminación.
+6
+Un ejemplo de estas transformaciones se muestra en la Tabla 7-1 y para un
+lista detallada de otras técnicas de aumento de datos para NLP, recomendamos
+leyendo Una encuesta visual de aumento de datos en NLP.
+Aumento
+
+Ninguno
+
+Oración
+
+Incluso si me derrotas Megatron, otros se levantarán para derrotar tu tiranía.
+reemplazo de sinónimos
+
+Incluso si me matas Megatron, otros probarán derrotar tu tiranía.
+
+Inserción aleatoria
+
+Incluso si me derrotas a Megatron, otra humanidad se levantará para derrotar a tu
+tiranía
+
+Intercambio aleatorio
+
+Incluso si me derrotas Megatron, otros se levantarán derrotados para tiranizar tu
+
+Eliminación aleatoria
+
+Incluso si eres Megatron, otros para derrotar a la tiranía.
+
+Retrotraducir
+(Alemán)
+
+Incluso si me derrotas, otros se levantarán para derrotar tu tiranía.
+
+Puede implementar la retrotraducción utilizando modelos de traducción automática como
+mientras que bibliotecas como NlpAug y TextAttack proporcionan varios
+recetas para perturbaciones simbólicas.
+En esta sección, nos centraremos en el uso
+reemplazo de sinónimos, ya que es simple de implementar y atraviesa el principal
+idea detrás del aumento de datos.
+Usaremos el aumentador ContextualWordEmbsAug de a
+aproveche las incrustaciones de palabras contextuales de DistilBERT para nuestro sinónimo
+reemplazos
+Comencemos con un ejemplo simple:
+
+Aquí podemos ver como la palabra “son” ha sido reemplazada por “representan” para
+generar un nuevo ejemplo de entrenamiento sintético.
+Podemos envolver este aumento
+en una función simple como sigue:
+
+Ahora, cuando llamamos a esta función con Dataset.
+mapa podemos generar cualquier
+número de nuevos ejemplos con las transformaciones_por_ejemplo
+argumento.
+Podemos usar esta función en nuestro código para entrenar el Naive Bayes
+clasificador simplemente agregando una línea después de seleccionar el segmento:
+
+Incluir esto y volver a ejecutar el análisis produce el gráfico que se muestra a continuación.
+De la figura podemos ver que una pequeña cantidad de aumento de datos
+mejora el rendimiento del clasificador Naive Bayes en alrededor de 5 puntos
+en puntaje F, y supera la canalización de tiro cero para los puntajes macro una vez
+tenemos alrededor de 150 muestras de entrenamiento.
+Veamos ahora un método
+basado en el uso de incrustaciones de grandes modelos de lenguaje.
+1
+
+Uso de incrustaciones como tabla de búsqueda
+Se ha demostrado que los modelos de lenguaje grande como GPT-3 son excelentes en
+resolver tareas con datos limitados.
+La razón es que estos modelos aprenden útiles
+representaciones de texto que codifican información a través de muchas dimensiones
+como sentimiento, tema, estructura del texto y más.
+Por esta razón, el
+Las incrustaciones de grandes modelos de lenguaje se pueden utilizar para desarrollar una semántica
+motor de búsqueda, encontrar documentos o comentarios similares, o incluso clasificar el texto.
+En esta sección, crearemos un clasificador de texto que sigue el modelo de OpenAI
+Punto final de clasificación de API.
+La idea sigue un proceso de tres pasos:
+1.
+Utilice el modelo de lenguaje para incrustar todos los textos etiquetados.
+2.
+Realice una búsqueda de vecino más cercano sobre las incrustaciones almacenadas.
+3.
+Agregue las etiquetas de los vecinos más cercanos para obtener una predicción.
+El proceso se ilustra en la Figura 7-4.
+Figura 7-4.
+Una ilustración de cómo funciona la búsqueda de incorporación del vecino más cercano: todos los datos etiquetados se
+incrustado con un modelo y almacenado con las etiquetas.
+Cuando un nuevo texto necesita ser clasificado es
+incrustado también y la etiqueta se da en base a las etiquetas de los vecinos más cercanos.
+Es importante
+para calibrar el número de vecinos a buscar, ya que muy pocos podrían ser ruidosos y demasiados podrían
+mezclar en grupos vecinos.
+La belleza de este enfoque es que no es necesario ajustar el modelo para
+aprovechar los pocos puntos de datos etiquetados disponibles.
+En cambio, la decisión principal de
+hacer que este enfoque funcione es seleccionar un modelo apropiado que sea idealmente
+preentrenado en un dominio similar a su conjunto de datos.
+Dado que GPT-3 solo está disponible a través de la API de OpenAI, usaremos GPT-2
+para probar la técnica.
+Específicamente, usaremos una variante de GPT-2 que fue
+entrenado en código Python, que con suerte capturará parte del contexto
+contenida en nuestros números de GitHub.
+Escribamos una función auxiliar que tome una lista de textos y obtenga el vector
+representación usando el modelo.
+Tomaremos el último estado oculto para cada
+token y luego calcule el promedio sobre todos los estados ocultos que no son
+enmascarado:
+
+
+Ahora podemos obtener las incrustaciones para cada división.
+Tenga en cuenta que los modelos de estilo GPT
+no tiene un token de relleno y, por lo tanto, debemos agregar uno antes de que podamos
+obtenga las incrustaciones por lotes como se implementó anteriormente.
+solo lo haremos
+recicle el token de fin de cadena para este propósito:
+incrustaciones_de_texto = {}
+tokenizador
+pad_token = tokenizador.
+eos_token
+para dividir en ["tren", "válido", "prueba"]:
+text_embeddings[split] = get_embeddings(ds[split]["text"])
+
+Ahora que tenemos todas las incrustaciones, necesitamos configurar un sistema para buscar
+a ellos.
+Podríamos escribir una función que calcule, digamos, la similitud del coseno
+entre una nueva incrustación de texto que vamos a consultar y la existente
+incrustaciones en el juego de trenes.
+Alternativamente, podemos usar una estructura integrada de
+la biblioteca de conjuntos de datos que se denomina índice FAISS.
+Puedes pensar en esto como un
+motor de búsqueda de incrustaciones y veremos más de cerca cómo funciona en
+un minuto.
+Podemos usar un campo existente del conjunto de datos para crear un
+Índice FAISS con Dataset.
+add_faiss_index o podemos cargar nuevos
+incrustaciones en el conjunto de datos con
+usemos
+la última función para agregar nuestras incrustaciones de trenes al conjunto de datos de la siguiente manera:
+
+
+Esto creó un nuevo índice FAISS llamado incrustación.
+Ahora podemos realizar
+una búsqueda de vecino más cercano llamando a la función
+obtener_ejemplos_más_cercanos.
+Devuelve los vecinos más cercanos, así como
+la puntuación de coincidencia de puntuación para cada vecino.
+Necesitamos especificar la consulta.
+incrustación, así como el número de vecinos más cercanos para recuperar.
+Vamos
+dale una vuelta y echa un vistazo a los documentos que están más cerca de un
+ejemplo:
+
+TEXTO:
+
+Añadir nuevo modelo CANINO
+Adición de nuevo modelo
+Descripcion del modelo
+Google propuso recientemente una nueva
+TEXTO:
+Añadir modelo Linformer
+Adición de nuevo modelo
+Descripcion del modelo
+Linformer: Autoatención con Complejidad Lineal
+CarácterBERT
+CharacterBERT es una variante de BERt que utiliza un
+Módulo CharacterCNN
+> en lugar de WordPieces.
+Como resultado, el modelo:
+1.
+No
+
+¡Lindo! Esto es exactamente lo que esperábamos: los tres documentos recuperados que
+obtuvimos a través de la búsqueda incrustada, todos tienen la misma etiqueta y ya podemos
+por los títulos que son todos muy parecidos.
+La pregunta sigue siendo, sin embargo,
+¿Cuál es el mejor valor para k? Del mismo modo, ¿cómo deberíamos entonces agregar el
+
+etiquetas de los documentos recuperados? ¿Deberíamos, por ejemplo, recuperar tres
+documentos y asignar todas las etiquetas que ocurrieron al menos dos veces? ¿O deberíamos
+ir por 20 y usar todas las etiquetas que aparecieron al menos cinco veces? Vamos
+investigue esto sistemáticamente y pruebe varios valores para k y luego varíe el
+umbral m < k para la asignación de etiquetas con una función auxiliar.
+grabaremos
+el rendimiento macro y micro para cada configuración para que podamos decidir más tarde
+qué ejecución se desempeñó mejor.
+En lugar de recorrer cada muestra en el
+conjunto de validación podemos hacer uso de la función
+
+Veamos cuáles serían los mejores valores con todas las muestras de entrenamiento
+y visualice las puntuaciones para todas las configuraciones de k y m:
+
+
+
+De las parcelas podemos ver que el rendimiento es mejor cuando elegimos
+k = 7 y m = 3.
+En otras palabras, cuando recuperamos los 7 vecinos más cercanos
+y luego asigne las etiquetas que ocurrieron al menos tres veces.
+Ahora que nosotros
+tener un buen método para encontrar los mejores valores para la búsqueda incrustada
+podemos jugar el mismo juego que con el clasificador Naive Bayes donde vamos
+a través de las porciones del conjunto de entrenamiento y evaluar el rendimiento.
+Antes
+podemos dividir el conjunto de datos que necesitamos para eliminar el índice ya que no podemos dividir
+un índice FAISS como el conjunto de datos.
+El resto de los bucles permanece exactamente igual.
+con la adición de usar el conjunto de validación para obtener los mejores valores de k y m:
+
+
+Estos resultados parecen prometedores: la búsqueda incrustada supera a Naive Bayes
+línea de base con 16 muestras en el conjunto de entrenamiento.
+aunque no consigamos
+supere la tubería de tiro cero en las puntuaciones macro hasta alrededor de 64 ejemplos.
+Eso significa que para este caso de uso, si tiene menos de 64 muestras, hace
+tiene sentido darle una oportunidad a la canalización de tiro cero y si tiene más muestras
+podría darle una oportunidad a una búsqueda de incrustación.
+Si es más importante para
+funcione bien en todas las clases por igual, es posible que esté mejor con la canalización zeroshot hasta que tenga más de 64 etiquetas.
+Toma estos resultados con pinzas; qué método funciona mejor fuertemente
+depende del dominio.
+Los datos de entrenamiento de la canalización de disparo cero son bastante
+diferente de los problemas de GitHub en los que lo estamos usando, que contiene una gran cantidad de
+código que el modelo probablemente no ha encontrado mucho antes.
+Para una mayor
+tarea común, como el análisis de opinión de las reseñas, la canalización podría funcionar
+mucho mejor.
+Asimismo, la calidad de las incrustaciones depende del modelo y
+datos en los que fue entrenado.
+Probamos media docena de modelos como 'sentencetransformers/stsb-roberta-large' que fue entrenado para dar
+incrustaciones de oraciones de alta calidad, y 'microsoft/codebertbase' así como 'dbernsohn/roberta-python' que fueron
+entrenado en código y documentación.
+Para este caso de uso específico GPT-2
+entrenado en código Python funcionó mejor.
+Dado que en realidad no necesita cambiar nada en su código además de
+reemplazando el nombre del punto de control del modelo para probar otro modelo, puede hacerlo rápidamente
+pruebe algunos modelos una vez que haya configurado la canalización de evaluación.
+Antes
+continuamos la búsqueda de encontrar el mejor enfoque en la etiqueta escasa
+dominio queremos tomar un momento para destacar la biblioteca FAISS.
+Búsqueda eficiente de similitudes con FAISS
+Encontramos FAISS por primera vez en el Capítulo 4, donde lo usamos para recuperar
+documentos a través de las incrustaciones DPR.
+Aquí explicaremos brevemente cómo
+La biblioteca FAISS funciona y por qué es una herramienta poderosa en la caja de herramientas de ML.
+Estamos acostumbrados a realizar consultas de texto rápidas en grandes conjuntos de datos como
+Wikipedia o la web con motores de búsqueda como Google.
+cuando nos movemos
+desde el texto hasta las incrustaciones, nos gustaría mantener ese rendimiento;
+sin embargo, los métodos utilizados para acelerar las consultas de texto no se aplican a
+incrustaciones
+Para acelerar la búsqueda de texto, generalmente creamos un índice invertido que mapea los términos
+a los documentos
+Un índice invertido funciona como un índice al final de un libro:
+cada palabra se asigna a las páginas (o en nuestro caso, documento) en las que aparece.
+Cuando luego ejecutamos una consulta, podemos buscar rápidamente en qué documentos
+aparecen los términos de búsqueda.
+Esto funciona bien con objetos discretos como palabras.
+pero no funciona con objetos continuos como vectores.
+cada documento
+
+probablemente tiene un vector único y, por lo tanto, el índice nunca coincidiría con un
+nuevo vector.
+En lugar de buscar coincidencias exactas, debemos buscar coincidencias cercanas.
+o coincidencias similares.
+Cuando queremos encontrar los vectores más similares en una base de datos a una consulta
+vector en teoría necesitaríamos comparar el vector de consulta con cada vector
+en la base de datos
+Para una pequeña base de datos como la que tenemos en este capítulo, esto es
+no hay problema, pero cuando escalamos esto a miles o incluso millones de
+entradas, tendríamos que esperar un rato hasta que se procese una consulta.
+FAISS aborda estos problemas con varios trucos.
+La idea principal es dividir
+el conjunto de datos
+Si solo necesitamos comparar el vector de consulta con un subconjunto del
+base de datos podemos acelerar el proceso significativamente.
+Pero si solo al azar
+particionar el conjunto de datos, ¿cómo podríamos decidir en qué partición buscar y
+qué garantías obtenemos para encontrar las entradas más similares.
+Evidentemente,
+tiene que haber una mejor solución: aplicar k-means clustering al conjunto de datos.
+Esto agrupa las incrustaciones en grupos por similitud.
+Además, para
+cada grupo obtenemos un vector centroide que es el promedio de todos los miembros de
+el grupo.
+Figura 7-5.
+Esta figura muestra la estructura de un índice FAISS.
+Los puntos grises representan puntos de datos
+agregados al índice y los puntos negros en negrita son los centros de clúster encontrados a través del agrupamiento de k-means.
+Las áreas coloreadas representan las regiones que pertenecen a un centro de clúster.
+Dada tal agrupación, la búsqueda es mucho más fácil: primero buscamos en todo el
+centroides para el que es más similar a nuestra consulta y luego buscamos
+dentro del grupo
+Esto reduce el número de comparaciones de n a k
+
+donde n es el número de vectores en la base de datos y k el número de
+racimos
+Entonces la pregunta es ¿cuál es la mejor opción para k? Si es demasiado pequeño,
+cada grupo aún contiene muchas muestras con las que debemos comparar en el
+primer paso y si k es demasiado grande, hay muchos centroides que necesitamos buscar
+a través de.
+Buscando el mínimo de la función k+ con respecto a k
+encontramos k = n.
+De hecho podemos visualizar esto con el siguiente gráfico:
+
+En el gráfico se puede ver el número de comparaciones en función de la
+número de agrupaciones.
+Estamos buscando el mínimo de esta función donde
+tenemos que hacer las comparaciones mínimas.
+Podemos ver que el mínimo es
+exactamente donde esperábamos ver en 2 = 2 = 1024.
+Además de acelerar las consultas con particiones, FAISS también le permite
+para utilizar GPU para una mayor aceleración.
+Si la memoria se convierte en una preocupación, hay
+también varias opciones para comprimir los vectores con cuantización avanzada
+esquemas
+Si desea utilizar FAISS para su proyecto, el repositorio tiene un
+guía simple para que elija los métodos correctos para su caso de uso.
+Uno de los proyectos más grandes para usar FAISS fue la creación de CCMatrix
+corpus por Facebook.
+Usaron incrustaciones multilingües para encontrar paralelos
+oraciones en diferentes idiomas.
+Este enorme corpus fue posteriormente
+utilizado para entrenar M2M-100, un gran modelo de traducción automática que es capaz de
+traducir directamente entre cualquiera de los 100 idiomas.
+Ese fue un pequeño desvío a través de la biblioteca FAISS.
+volvamos a
+clasificación ahora y tener una puñalada en el ajuste fino de un transformador en unos pocos
+ejemplos etiquetados.
+Ajuste fino de un transformador Vanilla
+Si tenemos acceso a datos etiquetados también podemos intentar hacer lo obvio:
+simplemente afine un modelo de transformador previamente entrenado.
+Podemos usar un
+punto de control estándar como bert-base-uncased o también podemos probar un
+punto de control de un modelo que se ha sintonizado específicamente en un dominio más cercano
+a la nuestra, como la que ha sido entrenada en debates sobre Stack Overflow.
+En
+En general, puede tener mucho sentido usar un modelo más cercano a su
+dominio y hay más de 10,000 modelos disponibles en Hugging Face
+centro.
+En nuestro caso, sin embargo, encontramos que el punto de control BERT estándar
+funcionó mejor.
+Comencemos cargando el tokenizador preentrenado y tokenicemos nuestro conjunto de datos y
+deshágase de las columnas que no necesitamos para el entrenamiento y la evaluación:
+
+Una cosa que es especial acerca de nuestro caso de uso es la clasificación multietiqueta
+aspecto.
+Los modelos y el Entrenador no son compatibles con esto de fábrica, pero el
+El entrenador se puede modificar fácilmente para la tarea.
+Parte del Entrenador
+bucle de entrenamiento es la llamada a la función compute_loss que devuelve el
+pérdida.
+Subclasificando el Trainer y sobrescribiendo el compute_loss
+función podemos adaptar la pérdida al caso multietiqueta.
+en lugar de calcular
+la pérdida de entropía cruzada en todas las etiquetas la calculamos para cada clase de salida
+por separado.
+Podemos hacer esto usando el
+
+
+Dado que es probable que sobreajustemos rápidamente los datos de entrenamiento debido a su tamaño limitado
+configuramos load_best_model_at_end=True y elegimos el mejor
+modelo basado en la puntuación micro F1.
+Dado que necesitamos el puntaje F1 para elegir el mejor modelo, debemos asegurarnos
+se calcula durante la evaluación.
+Dado que el modelo devuelve los logits,
+primero necesita normalizar las predicciones con una función sigmoidea y luego puede
+binarizarlos con un umbral simple.
+Luego devolvemos las puntuaciones que somos.
+interesado en el informe de clasificación:
+de scipy.
+exportación de importación especial como sigmoide
+
+¡Ahora estamos listos para pelear! Para cada porción del conjunto de entrenamiento entrenamos un clasificador
+desde cero, cargue el mejor modelo al final del ciclo de entrenamiento y almacene
+los resultados en el conjunto de prueba:
+En primer lugar, vemos que simplemente ajustando un modelo BERT estándar en el
+conjunto de datos conduce a resultados competitivos cuando tenemos acceso a alrededor de 64
+ejemplos
+También vemos que antes el comportamiento es un poco errático lo cual es nuevamente
+debido entrenamiento un modelo en una pequeña muestra donde algunas etiquetas pueden ser
+desequilibrada desfavorablemente.
+Antes de hacer uso de la parte no etiquetada de nuestro
+conjunto de datos echemos un vistazo rápido a otro enfoque prometedor para usar
+Modelos de lenguaje en el dominio de pocos disparos.
+Aprendizaje en contexto y de pocas tomas con avisos
+Hemos visto en la sección de clasificación de tiro cero que podemos usar un
+modelo de lenguaje como BERT o GPT-2 y adaptarlo a una tarea supervisada por
+usando indicaciones y analizando las predicciones del token del modelo.
+Esto es diferente
+desde el enfoque clásico de agregar un encabezado específico de tarea y ajustar el
+parámetros del modelo para la tarea.
+En el lado positivo, este enfoque no
+requieren datos de entrenamiento, pero en el lado negativo, parece que no podemos aprovechar
+datos etiquetados si tenemos acceso a ellos.
+A veces hay un término medio
+llamado aprendizaje en contexto o de pocos intentos.
+Para ilustrar el concepto, considere una tarea de traducción del inglés al francés.
+En
+el paradigma de disparo cero, construiríamos un indicador que podría verse como
+sigue:
+
+
+
+Con suerte, esto incita al modelo a predecir las señales de la palabra "merci".
+Cuanto más clara sea la tarea, mejor funcionará este enfoque.
+Un hallazgo interesante
+del documento GPT-37 fue la capacidad del modelo para aprender efectivamente de
+ejemplos presentados en el aviso.
+Lo que descubrió OpenAI es que puedes
+mejorar los resultados agregando ejemplos de la tarea al indicador como
+ilustrado en la figura Figura 7-6.
+Figura 7-6.
+Esta figura ilustra cómo GPT-3 puede utilizar ejemplos de la tarea proporcionada en el contexto.
+Tales secuencias de ejemplos pueden ocurrir naturalmente en el corpus previo al entrenamiento y, por lo tanto, el modelo aprende
+interpretar tales secuencias para predecir mejor el próximo token.
+Imagen de Language Models are FewShot Learners por T.
+Marrón et al (2020).
+Además, encontraron que cuanto más grandes se escalan los modelos, mejor se adaptan.
+están en el uso de los ejemplos en contexto que conducen a un rendimiento significativo
+aumenta
+Aunque los modelos de tamaño GPT-3 son difíciles de usar en producción,
+este es un campo de investigación emergente emocionante y la gente ha construido
+aplicaciones como un shell de lenguaje natural donde se ingresan comandos
+en lenguaje natural y analizado por GPT-3 para comandos de shell.
+Un enfoque alternativo para usar datos etiquetados es crear ejemplos de los
+indicaciones y predicciones deseadas y continuar entrenando el modelo de lenguaje
+sobre estos ejemplos.
+Un método novedoso llamado ADAPET8 utiliza tal
+enfoque y supera a GPT-3 en una amplia variedad de tareas ajustando el modelo con
+indicaciones generadas.
+Un trabajo reciente de los investigadores de Hugging Face9 sugiere
+que tal enfoque puede ser más eficiente en datos que ajustar un personalizado
+cabeza.
+En esta sección analizamos varias formas de hacer un buen uso de los pocos
+ejemplos etiquetados que tenemos.
+Muy a menudo también tenemos acceso a una gran cantidad de
+datos no etiquetados además de los ejemplos etiquetados y en la siguiente sección
+echamos un vistazo a cómo hacer un buen uso de él.
+Aprovechamiento de datos no etiquetados
+Aunque grandes volúmenes de datos etiquetados de alta calidad es el mejor caso
+escenario para entrenar un clasificador, esto no significa que los datos no etiquetados sean
+sin valor.
+Solo piense en el entrenamiento previo de la mayoría de los modelos que hemos usado:
+a pesar de que están capacitados en la mayoría de los datos no relacionados de Internet, nosotros
+puede aprovechar los pesos previamente entrenados para otras tareas en una amplia variedad de textos.
+Esta es la idea central del aprendizaje por transferencia en la PNL.
+Naturalmente, si el
+tareas posteriores tiene una estructura textual similar a la de los textos previos al entrenamiento.
+La transferencia funciona mejor.
+Entonces, si podemos acercar la tarea de preentrenamiento a la
+objetivo aguas abajo, podríamos mejorar potencialmente la transferencia.
+Pensemos en esto en términos de nuestro caso de uso concreto: BERT está preentrenado
+en el Book Corpus y la Wikipedia en inglés, por lo que los textos que contienen código y
+Los problemas de GitHub son definitivamente un pequeño nicho en este conjunto de datos.
+Si pre-entrenamos
+BERT desde cero, podríamos hacerlo rastreando todos los problemas en GitHub
+Por ejemplo.
+Sin embargo, esto sería costoso y muchos aspectos sobre
+lenguaje que aprendió BERT siguen siendo válidos para problemas de GitHub.
+Entonces, ¿hay un
+término medio entre volver a entrenar desde cero y simplemente usar el modelo tal como está
+para la clasificación? Existe y se llama adaptación de dominio.
+En lugar de
+reentrenando el modelo de lenguaje desde cero, podemos continuar entrenándolo en
+datos de nuestro dominio.
+En este paso usamos el modelo de lenguaje clásico
+objetivo de predecir palabras enmascaradas, lo que significa que no necesitamos ninguna
+datos etiquetados para este paso.
+Después de eso, podemos cargar el modelo adaptado como un
+clasificador y ajustarlo, aprovechando así los datos no etiquetados.
+La belleza de la adaptación del dominio es que, en comparación con los datos etiquetados,
+los datos no etiquetados a menudo están disponibles en abundancia.
+Además, el adaptado
+El modelo se puede reutilizar para muchos casos de uso.
+Imagina que quieres construir un
+clasificador de correo electrónico y aplicar la adaptación de dominio en todos sus correos electrónicos históricos.
+Más tarde puede usar el mismo modelo para el reconocimiento de entidades nombradas u otro
+tarea de clasificación como el análisis de sentimientos, ya que el enfoque es agnóstico a
+la tarea aguas abajo.
+Ajuste fino de un modelo de lenguaje
+En esta sección, ajustaremos el modelo BERT preentrenado con máscaras
+modelado de lenguaje en la parte no etiquetada del conjunto de datos.
+Para hacer esto nosotros
+solo necesita dos nuevos conceptos: un paso adicional al tokenizar los datos y un
+recopilador de datos especial.
+Comencemos con la tokenización.
+Además de los tokens ordinarios del texto, el tokenizer también agrega
+tokens especiales a la secuencia, como el [CLS] y el token [SEP] que
+se utilizan para la clasificación y la predicción de la siguiente oración.
+cuando lo hacemos
+modelo de lenguaje enmascarado queremos asegurarnos de no entrenar el modelo para
+también predecir estos tokens.
+Por eso los enmascaramos de la pérdida y
+podemos obtener una máscara al tokenizar configurando
+return_special_tokens_mask=Verdadero.
+Vamos a volver a tokenizar el texto
+con esa configuración:
+de importación de transformadores
+Lo que falta para comenzar con el modelado de lenguaje enmascarado es el mecanismo
+para enmascarar tokens en la secuencia de entrada y tener los tokens de destino en el
+salidas.
+Una forma en que podríamos abordar esto es configurando una función que
+enmascara tokens aleatorios y crea etiquetas para estas secuencias.
+En el uno
+mano, esto duplicaría el tamaño del conjunto de datos ya que también almacenaríamos el
+
+secuencia objetivo en el conjunto de datos y, por otro lado, usaríamos el mismo
+enmascaramiento de una secuencia cada época.
+Una solución mucho más elegante a esto es el uso de un recopilador de datos.
+Recuerde que el recopilador de datos es la función que construye el puente
+entre el conjunto de datos y las llamadas al modelo.
+Se toma una muestra de un lote del
+conjunto de datos y el recopilador de datos prepara los elementos en el lote para alimentarlos
+al modelo
+En el caso más simple lo hemos encontrado simplemente
+concatena los tensores de cada elemento en un solo tensor.
+En nuestro caso
+podemos usarlo para hacer el enmascaramiento y la generación de etiquetas sobre la marcha.
+De esa manera
+no necesitamos almacenarlo y obtenemos máscaras nuevas cada vez que tomamos muestras.
+El
+recopilador de datos para esta tarea se llama
+DataCollatorForLanguageModeling y lo inicializamos con el
+tokenizador del modelo y la fracción de tokens que queremos enmascarar llamada
+mlm_probabilidad.
+Usamos este recopilador para enmascarar el 15% de los tokens
+que sigue el procedimiento en el documento BERT original:
+
+
+Con el tokenizador y el recopilador de datos en su lugar, estamos listos para ajustar el
+modelo de lenguaje enmascarado.
+Elegimos el tamaño del lote para aprovechar al máximo el
+GPU, pero es posible que desee reducirlo si se encuentra con errores de falta de memoria:
+
+Podemos acceder al historial de registro del entrenador para ver el entrenamiento y la validación.
+pérdidas del modelo.
+Todos los registros se almacenan en
+entrenador.
+estado.
+log_history como una lista de diccionarios que podemos
+cargar fácilmente en un Pandas DataFrame.
+Dado que la validación no es
+realizado en sincronía con el cálculo de pérdida normal, faltan valores
+en el marco de datos.
+Por esta razón, eliminamos los valores faltantes antes de trazar
+las métricas:
+importar pandas como pd
+
+Parece que tanto la pérdida de entrenamiento como la de validación se redujeron considerablemente.
+Entonces, veamos si también podemos ver una mejora cuando afinamos un
+clasificador basado en este modelo.
+Afinando un Clasificador
+Ahora repetimos el procedimiento de ajuste fino con la ligera diferencia de que
+cargar nuestro propio punto de control personalizado:
+Comparando los resultados con el ajuste fino basado en Vanilla BERT, vemos que
+obtenemos una ventaja especialmente en el dominio de datos bajos, pero también cuando
+tenemos acceso a más etiquetas, obtenemos al menos un pequeño porcentaje de ganancia:
+
+Esto destaca que la adaptación del dominio puede mejorar el rendimiento del modelo.
+con datos sin etiquetar y poco esfuerzo.
+Naturalmente, cuantos más datos no etiquetados y
+cuantos menos datos etiquetados tenga, más impacto obtendrá con esto
+método.
+Antes de concluir este capítulo queremos mostrar dos métodos
+cómo puede aprovechar aún más los datos sin etiquetar con algunos trucos.
+Métodos Avanzados
+Ajustar el modelo de lenguaje antes de ajustarlo es un buen método ya que es
+sencillo y produce aumentos de rendimiento fiables.
+Sin embargo, hay
+algunos métodos más sofisticados que pueden aprovechar los datos no etiquetados incluso
+más.
+Mostrar estos métodos está más allá del alcance de este libro, pero
+resúmalos aquí, lo que debería ser un buen punto de partida en caso de que
+necesita más rendimiento.
+Aumento universal de datos
+El primer método se llama aumento universal de datos (UDA) y describe
+un enfoque para usar datos sin etiquetar que no solo se limita al texto.
+la idea es
+que las predicciones de un modelo deben ser consistentes incluso si la entrada es ligeramente
+distorsionado.
+Tales distorsiones se introducen con el aumento de datos estándar
+estrategias: rotaciones y ruido aleatorio para imágenes y reemplazos de fichas
+y retrotraducciones con texto.
+Podemos hacer cumplir la coherencia mediante la creación de un
+
+término de pérdida basado en la divergencia KL entre las predicciones de la
+entrada original y distorsionada.
+El aspecto interesante es que podemos hacer cumplir la consistencia en el
+datos no etiquetados y aunque no sabemos cuál es la predicción correcta
+es que minimizamos la divergencia KL entre las predicciones.
+Así que en el uno
+mano entrenamos los datos etiquetados con el enfoque supervisado estándar y en
+por otro lado introducimos un segundo bucle de entrenamiento donde entrenamos el
+modelo para hacer predicciones consistentes sobre los datos no etiquetados como se describe en
+figura Figura 7-7.
+Figura 7-7.
+Con UDA, la pérdida de entropía cruzada clásica de las muestras etiquetadas se aumenta con
+la pérdida de consistencia de las muestras no etiquetadas.
+Imagen del papel de la UDA.
+El desempeño de este enfoque con un puñado de etiquetas se acerca al
+rendimiento con miles de ejemplos.
+La desventaja es que primero
+necesita una canalización de aumento de datos y luego el entrenamiento lleva mucho más tiempo
+ya que también entrena en la fracción no etiquetada de su conjunto de datos.
+Autoformación consciente de la incertidumbre
+Otro método prometedor para aprovechar los datos no etiquetados es el conocimiento de la incertidumbre.
+Autoformación (UST).
+La idea es entrenar un modelo de maestro en los datos etiquetados.
+y luego use ese modelo para crear pseudo-etiquetas en los datos sin etiquetar.
+Entonces
+un estudiante es entrenado en los datos pseudo-etiquetados y después del entrenamiento se vuelve
+el profesor para la próxima iteración.
+Un aspecto interesante de este método es cómo las pseudo-etiquetas son
+generado: para obtener una medida de incertidumbre de las predicciones del modelo,
+la misma entrada se alimenta varias veces a través del modelo con el abandono activado.
+Luego, la varianza en las predicciones da un indicador de la certeza de la
+modelo en una muestra específica.
+Con esa incertidumbre medir el pseudo-
+
+Luego, las etiquetas se muestrean utilizando un método llamado aprendizaje activo bayesiano por
+Desacuerdo (CALVO).
+La tubería de capacitación completa se ilustra en la Figura 78.
+Figura 7-8.
+El método UST consiste en un profesor que genera pseudoetiquetas y un estudiante que es
+posteriormente entrenado en esas etiquetas.
+Después de que el estudiante es entrenado, se convierte en el maestro y el paso
+se repite.
+Imagen del artículo de la UST.
+Con este esquema de iteración, el maestro mejora continuamente en la creación
+pseudo-etiquetas y, por lo tanto, el modelo mejora el rendimiento.
+Al final esto
+enfoque también obtiene dentro de un pequeño porcentaje de modelo entrenado en el completo
+datos de entrenamiento con miles de muestras e incluso supera a UDA en varios
+conjuntos de datos
+Con esto concluye esta sección sobre cómo aprovechar los datos no etiquetados y
+pasamos ahora a la conclusión.
+Conclusión
+En este capítulo hemos visto que incluso si tenemos solo unas pocas o incluso ninguna etiqueta
+que no se pierde toda esperanza.
+Podemos utilizar modelos que han sido entrenados previamente en
+otras tareas como el modelo de lenguaje BERT o GPT-2 entrenado en Python
+código para hacer predicciones sobre la nueva tarea de clasificación de problemas de GitHub.
+Además, podemos usar la adaptación del dominio para obtener un impulso adicional cuando
+entrenar el modelo con una cabeza de clasificación normal.
+Cuál de los enfoques presentados funciona mejor en un caso de uso específico depende
+en una variedad de aspectos: cuántos datos etiquetados tiene, qué tan ruidoso es,
+qué tan cerca están los datos del corpus previo al entrenamiento, etc.
+para saber que
+funciona mejor, es una buena idea configurar una canalización de evaluación y luego iterar
+rápidamente.
+La API de la biblioteca de transformadores flexible le permite cargar rápidamente un
+un puñado de modelos y compararlos sin necesidad de ningún código
+
+cambios.
+Hay más de 10,000 en el centro de modelos y es probable que
+alguien trabajó en un problema similar en el pasado y puedes construir sobre
+de esta.
+Un aspecto que está más allá de este libro es la compensación entre un más
+enfoque complejo como UDA o UST y obtener más datos.
+Para evaluar
+su enfoque, tiene sentido al menos construir un conjunto de validación y prueba temprano
+en.
+En cada paso del camino también puede recopilar más datos etiquetados.
+Generalmente
+anotar unos pocos cientos de ejemplos es cuestión de un par de horas o unos pocos
+días y hay muchas herramientas que le ayudan a hacerlo.
+Dependiendo de qué
+está tratando de lograrlo puede tener sentido invertir algo de tiempo creando un
+pequeño conjunto de datos de alta calidad sobre la ingeniería un método muy complejo para
+compensar la falta de la misma.
+Con los métodos que presentamos en este
+portátil puede asegurarse de obtener el máximo valor de su preciado
+datos etiquetados.
+Todas las tareas que hemos visto hasta ahora en este libro caen en el dominio de la naturaleza.
+comprensión del lenguaje (NLU), donde tenemos un texto como entrada y lo usamos
+hacer una especie de clasificación.
+Por ejemplo, en la clasificación de texto
+predijimos una sola clase para una secuencia de entrada, mientras que en NER predijimos una
+clase para cada ficha.
+En la pregunta-respuesta clasificamos cada token como un
+token de inicio o final del intervalo de respuesta.
+Ahora pasamos de las tareas de NLU a
+tareas de generación de lenguaje natural (NLG), donde tanto la entrada como la
+la salida consiste en texto.
+En el próximo capítulo exploramos cómo entrenar modelos
+para resúmenes donde la entrada es un texto largo y la salida es un breve
+texto con su resumen.
+.
