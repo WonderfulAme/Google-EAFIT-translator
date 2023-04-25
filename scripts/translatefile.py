@@ -42,13 +42,13 @@ def webTranslate(txt,writeIn,translateTo):
 	translatedTxt = GoogleTranslator(source=writeIn, target=translateTo).translate(txt)
 	return translatedTxt
 def main():
-	name="chapters/4new.txt"
+	name="chapters/9.txt"
 	txt=readfilelist(name)
 	newtxt=""
-	translated="spanish."
+	translated="portugese."
 	for i in txt:
 		try:
-			newtxt+=webTranslate(i,"en","es")+"\n"
+			newtxt+=webTranslate(i,"en","pt")+"\n"
 			print(newtxt)
 		except:
 			writetxt(name.replace(".",translated),newtxt)#"".join(a))

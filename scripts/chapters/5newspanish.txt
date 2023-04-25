@@ -1,0 +1,23 @@
+Capítulo 5
+Cómo hacer que Transformers sea eficiente en la producción UNA NOTA PARA LOS LECTORES DE LANZAMIENTO TEMPRANO Con los libros electrónicos de lanzamiento anticipado, obtiene libros en su forma más temprana, el contenido sin editar y sin editar del autor mientras escribe, para que pueda aprovechar estas tecnologías mucho antes del lanzamiento oficial de estos títulos.
+Este será el quinto capítulo del último libro.
+Tenga en cuenta que el repositorio de GitHub se activará más adelante
+Si tiene comentarios sobre cómo podemos mejorar el contenido y/o los ejemplos de este libro, o si nota que falta material en este capítulo, comuníquese con el editor en mpotter@oreilly
+com
+En los capítulos anteriores, ha visto cómo se pueden ajustar los transformadores para producir grandes resultados en una amplia gama de tareas.
+Sin embargo, en muchas situaciones, la precisión (o cualquier métrica para la que esté optimizando) no es suficiente; su modelo de última generación no es muy útil si es demasiado lento o grande para cumplir con los requisitos comerciales de su aplicación
+Una alternativa obvia es entrenar un modelo más rápido y compacto, pero la reducción en la capacidad del modelo suele ir acompañada de una degradación en el rendimiento.
+Entonces, ¿qué puede hacer cuando necesita un modelo rápido, compacto y muy preciso? En este capítulo, exploraremos cuatro técnicas complementarias que se pueden usar para acelerar las predicciones y reducir la huella de memoria de sus modelos de Transformer: destilación de conocimiento, cuantificación, poda y optimización de gráficos con el formato Open Neural NetworkExchange (ONNX) y ONNX Runtime (ORT)
+También veremos cómo se pueden combinar algunas de estas técnicas para producir mejoras significativas en el rendimiento.
+Por ejemplo, este fue el enfoque adoptado por el equipo de ingeniería de Roblox en su artículo How We Scaled Bert ToServe 1+ Billion Daily Requests on CPUs, quien mostró en la Figura 5-1 que combinar la destilación del conocimiento y la cuantificación les permitió mejorar la latencia y el rendimiento de su BERT. clasificador por más de un factor de 30! Figura 5-1
+Cómo Roblox escaló BERT con destilación de conocimiento, relleno dinámico y cuantificación de peso (foto cortesía de los empleados de Roblox Quoc N
+Le y Kip Kaehler) Para ilustrar las ventajas y desventajas asociadas con cada técnica, utilizaremos la detección de intenciones como caso de estudio, ya que es un componente importante de los asistentes basados ​​en texto, donde las latencias bajas son fundamentales para mantener una conversación en tiempo real.
+En el camino, aprenderemos cómo crear entrenadores personalizados, realizar una búsqueda eficiente de hiperparámetros y obtener una idea de lo que se necesita para implementar investigaciones de vanguardia con Transformers.
+¡Vamos a sumergirnos! Detección de intenciones como estudio de caso Supongamos que estamos tratando de crear un asistente basado en texto para el centro de llamadas de nuestra empresa para que los clientes puedan solicitar el saldo de su cuenta o hacer reservas sin necesidad de hablar con un agente humano.
+Para comprender los objetivos de un cliente, nuestro asistente deberá poder clasificar una amplia variedad de texto en lenguaje natural en un conjunto de acciones o intenciones predefinidas.
+Por ejemplo, un cliente puede enviar un mensaje sobre un próximo viaje. Oye, me gustaría alquilar un vehículo del 1 al 15 de noviembre en París y necesito una furgoneta de 15 pasajeros y nuestro clasificador de intención podría categorizarlo automáticamente como una intención de alquiler de coche, que luego desencadena una acción y una respuesta
+Para ser robusto en un entorno de producción, nuestro clasificador también deberá poder manejar consultas fuera de alcance como las que se muestran en el segundo y tercer caso de la Figura 5-2, donde un cliente realiza una consulta que no pertenece a ningún de las intenciones predefinidas y el sistema debe producir una respuesta alternativa
+Por ejemplo, en el segundo caso de la Figura 5-2, un cliente hace una pregunta sobre un deporte que está fuera del alcance y el asistente de texto lo clasifica por error como una de las intenciones conocidas dentro del alcance, que se envía a un componente posterior que devuelve la respuesta del día de pago
+En el tercer caso, el asistente de texto ha sido capacitado para detectar consultas fuera de alcance (generalmente etiquetadas como una clase separada) e informa al cliente sobre qué temas puede responder.
+Figura 5-2
+Tres intercambios entre un humano (derecha) y un asistente basado en texto (izquierda) para finanzas personales (cortesía de StefanLarson et al.

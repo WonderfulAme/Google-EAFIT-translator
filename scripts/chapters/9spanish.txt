@@ -1,0 +1,703 @@
+Capítulo 9. Resumen
+UNA NOTA PARA LOS LECTORES DE SALIDA TEMPRANA
+Con los libros electrónicos Early Release, obtiene libros en su forma más antigua: el
+el contenido sin editar y sin editar del autor a medida que escribe, para que pueda tomar
+ventaja de estas tecnologías mucho antes del lanzamiento oficial de estos
+títulos
+Este será el capítulo 9 del libro final. Tenga en cuenta que GitHub
+repo se activará más adelante.
+Si tiene comentarios sobre cómo podríamos mejorar el contenido y/o
+ejemplos en este libro, o si nota que falta material dentro de este capítulo,
+comuníquese con el editor en mpotter@oreilly.com.
+En un momento u otro, probablemente hayas necesitado resumir un documento, ser
+es un artículo de investigación, un informe de ganancias financieras o un hilo de correos electrónicos. Si piensas
+al respecto, esto requiere una variedad de habilidades tales como comprender pasajes largos,
+razonar sobre los contenidos y producir un texto fluido que incorpore los
+temas principales del documento. Además, resumir una noticia es muy
+diferente a resumir un contrato legal, por lo que ser capaz de hacerlo requiere una
+grado sofisticado de generalización del dominio. Por estas razones, el texto
+resumir es una tarea difícil para los modelos de lenguaje neural, incluyendo
+Transformadores. A pesar de estos desafíos, el resumen de texto ofrece la posibilidad
+para que los expertos del dominio aceleren significativamente sus flujos de trabajo y es utilizado por
+empresas para condensar conocimientos internos, resumir contratos o
+generar automáticamente contenido para comunicados de redes sociales.
+Para comprender estos desafíos, este capítulo explorará cómo podemos aprovechar
+transformadores preentrenados para resumir documentos. Comencemos por echar un vistazo
+en uno de los conjuntos de datos canónicos para el resumen: artículos de noticias de la
+Corpus de CNN/DailyMail.
+
+El conjunto de datos de CNN/DailyMail
+El conjunto de datos de CNN/DailyMail consta de alrededor de 300.000 pares de artículos de noticias.
+y sus correspondientes resúmenes, compuestos a partir de las viñetas que CNN
+y el DailyMail se adjuntan a sus artículos. Un aspecto importante del conjunto de datos es
+que los resúmenes son abstractivos y no extractivos, lo que significa que
+consisten en oraciones nuevas en lugar de extractos simples. El conjunto de datos también es
+disponible en HuggingFace Dataset Hub, así que profundicemos y echemos un vistazo:
+
+
+El conjunto de datos tiene tres características: artículo que contiene los artículos de noticias,
+destaca con los resúmenes y la identificación para identificar de forma única cada artículo.
+Veamos un extracto de un artículo:
+Artículo (extracto de 500 caracteres, longitud total: 9396):
+Es oficial: el presidente de EE. UU., Barack Obama, quiere que los legisladores sopesen
+en el
+> si usar la fuerza militar en Siria. Obama envió una carta a
+los jefes de
+> la Cámara y el Senado la noche del sábado, horas después de anunciar
+que él
+> cree que la acción militar contra objetivos sirios es el paso correcto
+tomar
+> por el presunto uso de armas químicas. la propuesta
+
+legislación de Obama
+> pide al Congreso que apruebe el uso de la fuerza militar "para disuadir,
+interrumpir,
+> prevenir y degradar el potencial de usos futuros de che
+Resumen (extensión: 294):
+Funcionario sirio: Obama subió a la copa del árbol, "no sabe
+cómo llegar
+> abajo"
+Obama envía una carta a los jefes de la Cámara y el Senado.
+Obama buscará la aprobación del Congreso para la acción militar contra
+siria
+El objetivo es determinar si se usaron CW, no por quién, dice U.N.
+portavoz
+
+Vemos que los artículos pueden ser muy largos en comparación con el resumen de destino; en
+este caso particular la diferencia es de 17 veces. Los artículos largos suponen un desafío para
+la mayoría de los modelos de Transformer, ya que el tamaño del contexto suele estar limitado a 1000
+fichas más o menos, lo que equivale a unos pocos párrafos de texto. El estándar, todavía
+La forma cruda de lidiar con esto para resumir es simplemente truncar los textos.
+más allá del tamaño del contexto del modelo. Obviamente podría ser importante
+información para el resumen hacia el final del texto, pero por ahora necesitamos
+vivir con esta limitación de las arquitecturas modelo.
+
+Canalizaciones de resumen de texto
+Veamos cómo algunos de los modelos de transformadores más populares para
+realizar un resumen mirando primero cualitativamente los resultados de la
+ejemplo anterior. Aunque las arquitecturas modelo que exploraremos tienen
+variando los tamaños máximos de entrada, restrinjamos el texto de entrada a 2000 caracteres para
+tener la misma entrada para todos los modelos y así hacer que las salidas sean más
+comparable:
+
+Una convención en resumen es separar las oraciones de resumen por un
+nueva línea. Podríamos agregar un token de nueva línea después de cada punto, pero así de simple
+
+la heurística fallaría para cadenas como “U.S.” o “O.N.U.”. El paquete nltk incluye
+un algoritmo más sofisticado que puede diferenciar el final de una oración de
+puntuación que aparece en las abreviaturas:
+
+['Estados Unidos es un país', 'La ONU es una organización'].
+
+Línea base de resumen
+Una línea de base común para resumir artículos de noticias es simplemente tomar el primer
+tres oraciones de un artículo. Con el tokenizador de oraciones de nltk podemos fácilmente
+implementar tal línea de base:
+
+GPT-2
+Ya vimos en el Capítulo 8 cómo GPT-2 puede generar texto dado algunos
+inmediato. Una de las características sorprendentes del modelo es que también puede generar
+resúmenes simplemente agregando "TL; DR" al final del texto de entrada. El
+La expresión “TL;DR” (demasiado larga; no se leyó) se usa a menudo en plataformas como
+Reddit para indicar una versión corta de una publicación larga. vamos a empezar el
+experimento de resumen recreando el procedimiento del artículo original
+con las tuberías del Transformador. Creamos un pipeline de generación de texto y cargamos
+el gran modelo GPT-2 con 1.500 millones de parámetros:
+
+
+Aquí solo almacenamos los resúmenes del texto generado cortando la entrada
+consulta y guarda el resultado en un diccionario de Python para una comparación posterior.
+
+A continuación, probemos el T5 Transformer.1 Con T5, los autores realizaron un
+estudio exhaustivo de la transferencia de aprendizaje en PNL y descubrió que podían crear un
+Arquitectura universal de Transformer mediante la formulación de todas las tareas en un formato de texto a texto.
+estructura. Los puntos de control T5 provistos en HuggingFace Model Hub son
+entrenado en una mezcla de datos no supervisados ​​(entrenados para reconstruir enmascarados
+palabras) y datos supervisados ​​para varias tareas, incluido el resumen. Estos
+Por lo tanto, los puntos de control se pueden usar directamente para realizar resúmenes sin ajustes finos usando las mismas indicaciones que se usaron durante el entrenamiento previo cuando el modelo está
+capacitados en resúmenes supervisados. En este marco, el formato de entrada para
+el modelo para resumir un documento es "resumir <ARTÍCULO> o para
+traducción es traducir del inglés al alemán <TEXT>". Como se muestra
+en la Figura 9-1, esto hace que T5 sea extremadamente versátil y le permite resolver muchas
+tareas con un solo modelo.
+
+Figura 9-1. Diagrama del marco de texto a texto de T5 (cortesía de Colin Raffel).
+
+Podemos cargar directamente T5 para resumir con la tubería que también toma
+cuidado de formatear las entradas en el formato de texto a texto para que no tengamos que
+anteponga "resumir" al texto:
+bart
+BART2 es una arquitectura de transformador novedosa con codificador y decodificador
+pila entrenada para reconstruir la entrada corrupta que combina el preentrenamiento
+esquemas de BERT y GPT-2. El modelo facebook/bart-largecnn se ha ajustado específicamente en el conjunto de datos de CNN/DailyMail:
+
+PEGASO
+Al igual que BART, PEGASUS3 es un transformador completo con un codificador y
+descifrador. Como se muestra en la Figura 9-2, su objetivo de preentrenamiento es predecir
+oraciones en textos de varias oraciones. Los autores argumentan que cuanto más cerca está el
+El objetivo del preentrenamiento es que la tarea posterior sea más efectiva. Por
+con el objetivo de encontrar un objetivo de preentrenamiento que esté más cerca de la síntesis que
+modelado general del lenguaje, los autores identificaron automáticamente, en una gran cantidad
+corpus, oraciones que contienen la mayor parte del contenido de su entorno
+párrafos (utilizando métricas de evaluación de resumen como una heurística para el contenido
+superposición) y entrenó previamente el modelo PEGASUS para reconstruir estas oraciones
+obteniendo así un modelo de última generación para la síntesis de textos.
+
+Figura 9-2. Diagrama de la arquitectura de Pegasus (cortesía de Jingqing Zhang et al).
+
+Este modelo tiene un token especial para saltos de línea, por lo que no necesitamos el
+función sent_tokenize:
+
+Comparando diferentes resúmenes
+Ahora que hemos generado resúmenes con cuatro modelos diferentes,
+comparar los resultados. Tenga en cuenta que un modelo no ha sido entrenado en el
+conjunto de datos en absoluto (GPT-2), un modelo ha sido ajustado en esta tarea entre otras
+(T5) y dos modelos se han puesto a punto exclusivamente para esta tarea (BART y
+PEGASO).
+
+Es oficial: el presidente de EE. UU., Barack Obama, quiere que los legisladores sopesen
+en el
+> si usar la fuerza militar en Siria. Obama envió una carta a
+los jefes de
+> la Cámara y el Senado la noche del sábado, horas después de anunciar
+que él
+> cree que la acción militar contra objetivos sirios es el paso correcto
+tomar
+> por el presunto uso de armas químicas. la propuesta
+legislación de Obama
+> pide al Congreso que apruebe el uso de la fuerza militar "para disuadir,
+interrumpir,
+> prevenir y degradar el potencial de usos futuros de productos químicos
+armas o
+> otras armas de destrucción masiva". Es un paso que se establece para
+convertir un
+> crisis internacional en una feroz batalla política interna.
+
+hay clave
+> preguntas que se ciernen sobre el debate: ¿Qué hizo la ONU?
+los inspectores encuentran en
+> Siria? ¿Qué sucede si el Congreso vota no? ¿Y cómo será el sirio?
+gobierno
+> reaccionar? En un discurso televisado desde el jardín de rosas de la Casa Blanca
+más temprano
+> El sábado, el presidente dijo que llevaría su caso al Congreso,
+no porque
+> tiene que hacerlo, pero porque quiere. "Aunque creo que tengo la
+autoridad
+> llevar a cabo esta acción militar sin autorización específica del Congreso
+> autorización, sé que el país será más fuerte si
+toma esto
+> por supuesto, y nuestras acciones serán aún más efectivas", dijo.
+"Deberíamos
+> tener este debate, porque los problemas son demasiado grandes para los negocios como
+habitual."
+> Obama dijo que los principales líderes del Congreso acordaron programar una
+debate cuando el
+> cuerpo regresa a Washington el 9 de septiembre. El Senado de Relaciones Exteriores
+Relaciones
+> El comité llevará a cabo una audiencia sobre el asunto el martes, 1 de septiembre de 2019.
+Roberto
+> Dijo Menéndez. Transcripción: Lea los comentarios completos de Obama. sirio
+crisis: Lo último
+> desarrollos . Los inspectores de la ONU abandonan Siria. Los comentarios de Obama llegaron
+dentro de poco
+> después de que los inspectores de la ONU abandonaran Siria con pruebas que
+determinar
+> si se usaron armas químicas en un ataque a principios de la semana pasada
+en un Damasco
+> suburbio. "El objetivo del juego aquí, el mandato, es muy claro, y eso es
+> para determinar si se usaron armas químicas, y no por
+quién", spo de la ONU
+VERDAD BÁSICA
+Funcionario sirio: Obama subió a la copa del árbol, "no sabe
+cómo llegar
+> abajo"
+Obama envía una carta a los jefes de la Cámara y el Senado.
+Obama buscará la aprobación del Congreso para la acción militar contra
+siria
+El objetivo es determinar si se usaron CW, no por quién, dice U.N.
+portavoz
+BASE
+Es oficial: el presidente de EE. UU., Barack Obama, quiere que los legisladores sopesen
+en el
+
+> si usar la fuerza militar en Siria.
+Obama envió una carta a los jefes de la Cámara y el Senado el sábado
+noche,
+> horas después de anunciar que cree en la acción militar contra
+sirio
+> objetivos es el paso correcto para hacerse cargo del presunto uso de
+armas químicas.
+La legislación propuesta por Obama pide al Congreso que apruebe el uso
+de militares
+> obligar a "disuadir, interrumpir, prevenir y degradar el potencial de
+usos futuros
+> de armas químicas u otras armas de destrucción masiva".
+GPT2
+Escándalo de las armas químicas en Siria: quién es el responsable.
+¿Quién no tiene nada que ver con eso?
+¿Quién es responsable del ataque con armas químicas en Qusair?
+¿Quién no tiene nada que ver con eso?
+El presidente Obama dijo el sábado que no quería tomar esta
+emitido a
+> Congreso, pero lo hizo porque quería un debate público sobre el uso
+de militares
+> fuerza.
+¿Pero realmente quiere tener esa discusión?
+¿Qué hicieron el gobierno sirio, las fuerzas de oposición y sus aliados?
+realmente
+> la semana pasada ahí, y alguna vez obtendremos esas respuestas?
+Este es el por qué
+T5
+El presidente envía una carta a los jefes de la Cámara y el Senado.
+quiere que los legisladores evalúen si usar la fuerza militar en
+siria
+el presidente dice que llevará su caso al congreso, no porque él
+tiene que .
+"Deberíamos tener este debate, porque los problemas son demasiado grandes para
+negocio como
+> habitual", dice.
+bart
+Obama envía una carta a los jefes de la Cámara y el Senado.
+Quiere que el Congreso apruebe el uso de la fuerza militar en Siria.
+"Deberíamos tener este debate, porque los problemas son demasiado grandes para
+negocio como
+> habitual", dice.
+El Comité de Relaciones Exteriores del Senado llevará a cabo una audiencia sobre el
+asunto en
+> Martes.
+PEGASO
+
+Obama envía una carta a los jefes de la Cámara y el Senado.
+Pide al Congreso que apruebe el uso de la fuerza militar.
+Obama: "Deberíamos tener este debate, porque los temas son demasiado grandes
+para negocios
+> como siempre"
+
+Lo primero que notamos al observar los resultados del modelo es que el resumen
+generado por GPT-2 tiene un sabor bastante diferente al de los demás, lo cual no es tan
+sorprendente ya que el modelo no fue entrenado explícitamente para esta tarea. Cuando nosotros
+compare el contenido del resumen de GPT-2 con el texto de entrada, notamos que el
+modelo “alucina” e inventa citas y hechos que no forman parte del texto.
+Al comparar los otros tres resúmenes del modelo con la realidad básica, vemos
+que hay una superposición notable.
+Ahora que hemos evaluado subjetivamente algunos modelos, intentemos decidir
+qué modelo usaríamos en un entorno de producción. Los tres modelos (T5,
+BART y PEGASUS) parecen proporcionar resultados cualitativos razonables, y
+Podría generar algunos ejemplos más para decidir. Sin embargo, esto no es un
+manera sistemática de determinar el mejor modelo! Idealmente, definiríamos un
+métrica, mídala para todos los modelos en algún conjunto de datos de referencia y tome la
+con el mejor rendimiento. Pero, ¿cómo se define una métrica para la generación de texto?
+Las métricas estándar que hemos visto como exactitud, recuperación y precisión no son
+fácil de aplicar a esta tarea. Para cada resumen "dorado", escrito por un humano,
+docenas de otros resúmenes con sinónimos, perífrasis o un poco diferente
+forma de formular los hechos podría ser igualmente aceptable.
+En la siguiente sección, veremos algunas métricas comunes que se han desarrollado
+para medir la calidad del texto generado.
+
+Medición de la calidad del texto generado
+Las buenas métricas de evaluación son importantes ya que las usamos para medir la
+desempeño de los modelos no solo cuando los entrenamos sino también más adelante en
+producción. Si tenemos malas métricas, podríamos estar ciegos a la degradación del modelo y
+si no están alineados con los objetivos comerciales, es posible que no generemos ningún valor.
+Medir el rendimiento de la generación de texto no es tan fácil como con el estándar
+tareas de clasificación como el análisis de sentimientos o el reconocimiento de entidades nombradas.
+
+Tomemos el ejemplo de la traducción; dada una oración como "¡Me encantan los perros!" en Inglés
+y traduciéndolo al español puede haber múltiples posibilidades válidas como “¡Me
+encantan los perros” o “¡Me gustan los perros!”. Simplemente comparando exactamente
+la coincidencia con una traducción de referencia no es óptima e incluso a los humanos les iría bien
+mal en tal métrica solo porque todos escribimos texto de manera diferente a
+entre nosotros e incluso de nosotros mismos dependiendo de la hora del día o del año.
+Esto no parece una buena solución.
+Dos de las métricas más comunes utilizadas para evaluar el texto generado son BLEU
+y ROJO. Echemos un vistazo a cómo se definen.
+
+AZUL
+La idea de BLEU es simple: en lugar de mirar cuántos de los tokens en
+los textos generados están perfectamente alineados con los tokens de texto de referencia,
+comparar las palabras o n-gramas que aparecen entre los textos. BLEU es un
+métrica basada en la precisión, lo que significa que cuando comparamos los dos textos
+contar el número de palabras en la generación que ocurren en la referencia y
+dividirlo por la longitud de la referencia.
+Sin embargo, hay un problema con esta precisión vainilla. Supongamos que se genera
+el texto simplemente repite la misma palabra una y otra vez y esta palabra también aparece
+en la referencia. Si se repite tantas veces como la longitud de la referencia
+texto, ¡entonces obtenemos una precisión perfecta! Por ello los autores del BLEU
+papel introdujo una ligera modificación: una palabra sólo se cuenta tantas veces
+como ocurre en la referencia. Ilustremos este punto con lo siguiente
+generación y referencia:
+Texto de referencia: el gato está en la alfombra
+Ejemplo de generar texto: el el el el el el
+A partir de este sencillo ejemplo podemos calcular los valores de precisión de la siguiente manera:
+
+y podemos ver que la simple corrección ha producido una mucho más
+valor razonable. Ahora ampliemos esto no solo mirando palabras sueltas sino
+n-gramas también. Supongamos que tenemos una oración generada pero que
+desea comparar con una oración de referencia snt. Extraemos todos los ngramas posibles de grado n y hacemos la contabilidad para obtener la precisión p :
+
+
+La definición de una oración no es muy estricta en esta ecuación, y si tuvieras una
+texto generado que abarca varias oraciones, lo trataría como una sola oración.
+En general, tenemos más de una muestra en el conjunto de prueba que queremos evaluar, por lo que
+necesitamos extender ligeramente la ecuación sumando todas las muestras también:
+
+Estamos casi alli. Dado que no estamos analizando la recuperación, todas las secuencias generadas
+que son breves pero precisas tienen un beneficio frente a las oraciones que son más largas.
+Por lo tanto, las puntuaciones de precisión favorecen a las generaciones cortas. Para compensar eso
+los autores introdujeron un término adicional, la pena de brevedad:
+
+Tomando el mínimo, nos aseguramos que esta penalización nunca exceda de 1 y el
+término exponencial se vuelve exponencialmente pequeño cuando la longitud del generado
+el texto l es más pequeño que el texto de referencia l . Llegados a este punto te preguntarás por qué
+¿No usamos algo así como la puntuación F 1 para tener en cuenta también el recuerdo? El
+La respuesta es que, a menudo, en los conjuntos de datos de traducción hay varias referencias.
+oraciones en lugar de solo una, por lo que si también midiéramos el recuerdo,
+incentivar las traducciones que usaron todas las palabras de todas las traducciones. Por tanto, es
+Es más fácil decir que buscamos una alta precisión en la traducción y nos aseguramos de que
+traducción tienen una longitud similar.
+generación
+
+
+Finalmente, podemos juntar todo y obtener la ecuación para el BLEU
+puntaje:
+
+
+El último término es la media geométrica de la precisión modificada hasta n-grama N.
+En la práctica, la puntuación BLEU-4 se usa a menudo y se ha demostrado que se correlaciona
+con la percepción humana de la calidad del texto en algunos puntos de referencia. Sin embargo, puedes
+probablemente ya vea que esta métrica tiene muchas limitaciones; por ejemplo
+no tiene en cuenta los sinónimos y muchos pasos en la derivación anterior
+parecen heurísticas ad-hoc y bastante frágiles.
+En general, el campo de la generación de texto aún está buscando una mejor evaluación.
+métricas, y encontrar formas de superar los límites de métricas como BLEU es un
+área activa de investigación. Una debilidad de la métrica BLEU es que espera que el
+texto que ya está tokenizado. Esto puede conducir a diferentes resultados si exactamente el mismo
+no se utiliza el método de tokenización de texto. La métrica sacrebleu aborda esto
+problema mediante la internalización del paso de tokenización. Por esta razón es el preferido
+métrica para la evaluación comparativa.
+Ahora hemos trabajado con algo de teoría, pero lo que realmente queremos hacer es
+calcular la puntuación de algún texto generado. ¿Significa eso que tenemos que
+implementar toda esta lógica en Python? No tema, la biblioteca de conjuntos de datos también proporciona
+¡métrica! Cargar una métrica funciona igual que cargar un conjunto de datos:
+
+Produce puntajes BLEU junto con sus estadísticas suficientes
+de una fuente contra una o más referencias.
+
+smooth: El método de suavizado a utilizar
+smooth_value: para el suavizado de 'piso', el piso a usar
+fuerza: ignorar los datos que parecen tokenizados
+minúsculas: minúsculas los datos
+tokenize: el tokenizador a usar
+
+
+El objeto Metric funciona como un agregador: puede agregar instancias individuales
+con Metric.add o lotes completos a través de Metric.add_batch. Una vez tú
+ha agregado todas las muestras que necesita evaluar, luego llama
+Metric.compute y se calcula la métrica. Esto devuelve un diccionario con
+varios valores, como la precisión de cada n-grama, la penalización de longitud y
+como la puntuación BLEU final. Veamos el ejemplo de antes:
+
+
+NOTA
+La puntuación BLEU también funciona si hay varias traducciones de referencia. Esta es la razón por la cual el
+la traducción de referencia se pasa como una lista. Para hacer que la métrica sea más suave para recuentos cero en
+los n-gramas, BLEU integra métodos para modificar el cálculo de precisión. Un método es
+agregue una constante al numerador que se llama piso. De esa forma, un n-grama faltante no
+hacer que la puntuación vaya automáticamente a cero. Con el propósito de explicar los valores pasamos
+apáguelo configurando smooth_value=0.
+
+Podemos ver que la precisión de 1 gramo es de hecho 2/6 mientras que la precisión para
+los 2/3/4 gramos son todos cero. Esto significa que la media geométrica es cero y por lo tanto
+también la puntuación BLEU. Veamos otro ejemplo donde la predicción es
+casi correcto:
+
+
+
+
+Observamos que las puntuaciones de precisión son mucho mejores. Los 1 gramos en el
+todas las predicciones coinciden y solo en las puntuaciones de precisión vemos que algo está
+apagado. Para el de 4 gramos solo hay dos candidatos ['el', 'gato', 'es',
+'on'] y ['cat', 'is', 'on', 'mat'] donde el último no
+coincidencia y por lo tanto la precisión de 0.5.
+La puntuación BLEU se usa ampliamente para evaluar texto, especialmente en máquina.
+traducción, ya que las traducciones precisas suelen preferirse a la traducción que
+incluir todas las palabras posibles y apropiadas.
+Hay otras aplicaciones como resumen donde la situación es
+diferente. Allí queremos toda la información importante en el texto generado, así que
+favorecen un alto recuerdo. Aquí es donde se suele utilizar la puntuación ROUGE.
+
+COLORETE
+La partitura ROUGE se desarrolló específicamente para aplicaciones como
+resumen donde un alto recuerdo es más importante que solo precisión. El
+El enfoque es muy similar al puntaje BLEU en el sentido de que observamos diferentes n-gramas
+y comparar sus ocurrencias entre el texto generado y las referencias. El
+diferencia entre BLEU y ROUGE es que con ROUGE comprobamos cómo
+muchos n-gramas en el texto de referencia también aparecen en el texto generado. Para azul
+
+observamos cuántos tokens en el texto generado aparecen en la referencia. Entonces
+podemos reutilizar la fórmula de precisión con una modificación menor que contamos el
+ocurrencia (sin recortar) de n-gramas de referencia en textos generados en el
+numerador:
+
+Esta fue la propuesta original de ROUGE. Desde entonces la gente descubrió que completamente
+eliminar la precisión puede tener fuertes efectos negativos. Volviendo a la BLEU
+fórmula sin el conteo recortado, también podemos medir la precisión y
+luego puede combinar precisión y recordar puntajes ROUGE en el armónico
+significa obtener una puntuación F 1. Esta puntuación F 1 es la métrica que es hoy en día
+comúnmente reportado para ROUGE.
+Hay una puntuación separada en ROUGE para medir la subcadena común más larga
+(LCS) llamado ROUGE-L. El LCS se puede calcular para cualquier par de cadenas. Para
+ejemplo, el LCS para "abab" y "abc" sería "ab" y su longitud sería
+ser 2. Si queremos comparar este valor entre dos muestras necesitamos
+normalícelo de alguna manera, de lo contrario, los textos más largos serían una ventaja. A
+lograr esto, el inventor de ROUGE ideó un esquema similar a un puntaje F
+donde el LCS se normaliza con la longitud de la referencia y se genera
+texto. Luego, las dos puntuaciones normalizadas se mezclan:
+
+
+De esa manera, la puntuación LCS se normaliza correctamente y se puede comparar entre
+muestras En la implementación de Datasets, se calculan dos variaciones del mismo:
+se calcula por oración y se promedia para los resúmenes (ROUGE-L) y
+el otro segundo lo calcula directamente sobre todo el resumen (ROUGELsum).
+
+Calculemos las puntuaciones de ROUGE para los resúmenes generados de los modelos:
+
+
+Ya generamos un conjunto de resúmenes con GPT-2 y los otros modelos, y
+ahora tenemos una métrica para comparar los resúmenes de manera sistemática. Así que apliquemos
+la puntuación ROUGE a todos los resúmenes de los modelos:
+
+NOTA
+La métrica ROUGE que se implementa en Datasets también calcula los intervalos de confianza (mediante
+por defecto los percentiles 5 y 95). El valor promedio se almacena en el atributo mid y el
+intervalo se puede recuperar con bajo y alto.
+
+Estos resultados obviamente no son muy confiables ya que solo observamos un solo
+muestra, pero podemos comparar la calidad del resumen para ese ejemplo.
+La tabla confirma nuestra observación de que GPT-2 claramente funciona peor entre
+los modelos. Esto no es de extrañar ya que es el único modelo del grupo que
+no fue entrenado explícitamente para resumir. Llama la atención que los tres primeros simples
+la línea de base de la oración se acerca a los modelos de transformadores que tienen en el pedido
+de 1 billón de parámetros! PEGASUS parece superar a BART en todos los
+métricas y se desempeña mejor en la métrica ROUGE-2 en todos los modelos, pero T5 es
+ligeramente mejor en ROUGE-1 y las puntuaciones de LCS. Teniendo en cuenta que usamos t5large que tiene 11 mil millones de parámetros en comparación con PEGASUS que tiene 500
+millones de parámetros (¡5%!) Este es un resultado notable. Si bien este lugar de resultados
+PEGASUS como el mejor modelo entre nuestros tres modelos y parece consistente
+con el documento PEGASUS que mostró resultados de última generación, es obviamente
+no es un procedimiento de evaluación confiable ya que evaluamos los modelos en un solo
+ejemplo solamente.
+Por lo tanto, vayamos un paso más allá y evalúemos el modelo en todo el conjunto de prueba de
+nuestros puntos de referencia.
+
+Evaluación de PEGASUS en CNN/DailyMail
+conjunto de datos
+Ahora tenemos todas las piezas en su lugar para evaluar el modelo correctamente: tenemos un
+conjunto de datos con un conjunto de prueba de CNN/DailyMail, tenemos una métrica con ROUGE
+y tenemos un modelo afinado. Así que solo tenemos que juntar las piezas.
+Primero, evalúemos el desempeño de la línea base de tres oraciones:
+
+Ahora aplicamos la función a un subconjunto de los datos. Dado que la fracción de prueba de la
+El conjunto de datos de CNN/DailyMail consta de aproximadamente 10.000 muestras, lo que genera
+resúmenes de todos estos artículos lleva mucho tiempo. Con el fin de mantener
+los cálculos son relativamente rápidos, submuestreamos el conjunto de prueba y ejecutamos la evaluación
+en 1.000 muestras en su lugar. Esto debería darnos una puntuación mucho más estable.
+estimación mientras se completa en menos de una hora en una sola GPU para el
+Modelo PEGASO:
+base
+
+Las puntuaciones son significativamente peores que en el ejemplo anterior, pero aún mejores
+que GPT-2! Implementemos la misma función para evaluar el PEGASUS
+modelo:
+
+
+Descomprimamos un poco este código de evaluación. Primero dividimos el conjunto de datos en más pequeños
+lotes que podemos procesar simultáneamente. Luego, para cada lote tokenizamos
+los artículos de entrada y alimentarlos a la función de generar para producir el
+resúmenes utilizando la búsqueda de haz. Finalmente, decodificamos los textos generados, reemplazamos
+el token <n>, y agregue los textos decodificados con las referencias a la métrica. En
+al final calculamos y devolvemos las puntuaciones de ROUGE.
+
+Estos puntajes no son malos, pero aún están ligeramente alejados de los resultados publicados, lo que podría
+explicarse por el hecho de que en el papel una función de generación de texto diferente
+se utilizó. Esto resalta la importancia de la estrategia de decodificación ya que
+diferentes configuraciones conducen a textos generados que tienen más o menos superposición con el
+verdad básica que afecta las puntuaciones de ROUGE. Eso significa que la pérdida y la precisión del token están desvinculadas hasta cierto punto de las puntuaciones de ROUGE. Desde
+ROUGE y BLEU se correlacionan mejor con el juicio humano en el que debemos centrarnos
+ellos y por lo tanto cuidadosamente explorar y elegir la estrategia de decodificación cuando
+construcción de modelos de generación de texto.
+
+Entrenamiento de su propio modelo de resumen
+Trabajamos en muchos detalles sobre el resumen y la evaluación del texto para que
+finalmente, ¡utilicémoslo para entrenar un modelo de resumen de texto personalizado! Para nuestro
+aplicación, usaremos el conjunto de datos SAMSum desarrollado por Samsung que
+consiste en una colección de diálogos junto con sus resúmenes. en un
+entorno empresarial, estos diálogos podrían representar las interacciones entre un
+cliente y el centro de soporte, generando así resúmenes precisos de los
+la conversación puede ayudar a mejorar el servicio al cliente y detectar patrones comunes
+entre las solicitudes de los clientes. Carguémoslo y veamos un ejemplo:
+
+
+Diálogo:
+Hannah: Oye, ¿tienes el número de Betty?
+Amanda: déjame revisar
+Ana: <archivo_gif>
+Amanda: Lo siento, no puedo encontrarlo.
+Amanda: Pregúntale a Larry
+Amanda: Él la llamó la última vez que estuvimos juntos en el parque.
+Hannah: no lo conozco bien
+Ana: <archivo_gif>
+Amanda: No seas tímida, es muy simpático.
+ana: si tu lo dices..
+Hannah: Preferiría que le enviaras un mensaje de texto.
+Amanda: Solo envíale un mensaje de texto :)
+Hannah: Urgh... Está bien
+Hannah: Adiós
+amanda: adios
+Resumen:
+Hannah necesita el número de Betty pero Amanda no lo tiene. Ella necesita
+contacto
+> Larry.
+
+Los diálogos se parecen a lo que esperaría de un chat a través de SMS o
+WhatsApp, incluidos emojis y marcadores de posición para GIF. ¿Podría un modelo que
+
+¿Se ajustó el conjunto de datos de CNN/DailyMail para tratar eso? Encontremos
+¡afuera!
+
+Evaluación de PEGASUS en SAMSum
+Primero ejecutamos la misma canalización de resumen con PEGASUS para ver cuál es el
+la salida parece. Podemos reutilizar el código que usamos para CNN/DailyMAil
+generación de resumen.
+Resumen:
+Amanda: Pregúntale a Larry
+Amanda: Él la llamó la última vez que estuvimos en el
+estacionar juntos.
+Hannah: Preferiría que le enviaras un mensaje de texto.
+Amanda: Solo envíale un mensaje de texto.
+
+Podemos ver que el modelo trata principalmente de resumir extrayendo la clave
+frases del diálogo. Esto probablemente funcionó relativamente bien en el
+El conjunto de datos de CNN/DailyMail, pero los resúmenes en SAMSum son más abstractos. Vamos
+confirme esto ejecutando la evaluación ROUGE completa en el equipo de prueba.
+
+Bueno, los resultados no son excelentes, pero esto tampoco es inesperado ya que nos mudamos
+bastante lejos de la distribución de CNN/DailyMail. Sin embargo, establecer
+la tubería de evaluación antes del entrenamiento tiene dos ventajas: podemos directamente
+medir el éxito del entrenamiento con la métrica y tenemos una buena línea de base.
+Al ajustar el modelo en nuestro conjunto de datos, la métrica ROUGE debería obtener
+inmediatamente mejor y si ese no es el caso sabemos que algo anda mal con
+nuestro ciclo de entrenamiento.
+
+Ajuste fino de PEGASUS
+Antes de procesar los datos para el entrenamiento, echemos un vistazo rápido a la longitud.
+distribución de las entradas y salidas:
+
+
+Vemos que la mayoría de los diálogos son mucho más cortos que los artículos de CNN/DailyMail
+con 100-200 fichas por diálogo. Del mismo modo, los resúmenes son mucho más breves,
+con alrededor de 20-40 tokens (la longitud promedio de un tweet).
+Creación de un recopilador de datos personalizado
+Tengamos eso en cuenta cuando construyamos el recopilador de datos para el Entrenador. Primero
+necesitamos tokenizar el conjunto de datos y, por ahora, establecemos la longitud máxima en
+1024 y 128 para los diálogos y resúmenes, respectivamente:
+def convert_examples_to_features(example_batch):
+
+Ahora, necesitamos crear el recopilador de datos. Esta función se llama en el
+Entrenador justo antes de que el lote pase por el modelo. En la mayoría de los casos podemos
+
+use el intercalador predeterminado que recopila todos los tensores del lote y
+simplemente los apila. Para la tarea de resumen necesitamos implementar dos
+pasos adicionales: recortar los lotes para reducir el relleno innecesario y preparar el
+Entradas y etiquetas del decodificador.
+Al observar las longitudes de las secuencias, vimos que varían mucho y la mayoría
+de ellos son mucho más cortos que las longitudes máximas de 1024 y 128 para el
+diálogos y resúmenes. Dado que el pase hacia adelante escala como O(N) con el
+longitud de la secuencia de entrada, no debemos desperdiciar nuestro cálculo y aprobación
+entradas innecesariamente largas. Idealmente, la longitud de entrada para cada lote
+sería la longitud máxima de secuencia en ese lote, no la global. Nosotros
+puede hacer esto en el intercalador eliminando todas las columnas en el lote que solo
+contienen fichas de relleno. La siguiente función trim_batch hace el trabajo:
+
+
+Ahora todo lo que queda es preparar las etiquetas y las entradas del decodificador. PEGASO es un
+transformador codificador-decodificador y, por lo tanto, tiene el clásico secuencia a secuencia
+(seq2seq) arquitectura. En una configuración de seq2seq, un enfoque común es aplicar
+“profesor forzado” en el decodificador. El decodificador también recibe tokens de entrada (como
+modelos de solo decodificador como GPT-2) que consiste en las etiquetas desplazadas por
+uno además de la salida del codificador. Así que al hacer la predicción para el
+siguiente token, el decodificador obtiene la verdad básica desplazada por uno como entrada que es
+ilustrado en la tabla [Enlace a Come]. Lo desplazamos de uno en uno para que solo el decodificador
+ve las etiquetas de verdad del suelo anteriores y no las actuales o futuras.
+El cambio solo es suficiente ya que el decodificador ha enmascarado la autoatención que enmascara
+todos los insumos en el presente y en el futuro.
+
+
+Entonces, cuando preparamos nuestro lote, configuramos las entradas del decodificador cambiando el
+etiquetas a la derecha por uno. Después de eso, nos aseguramos de que las fichas de relleno en el
+las etiquetas son ignoradas por la función de pérdida al establecerlas en -100. Ahora configuramos
+el recopilador de datos, que es solo una función que toma una lista de diccionarios como entrada:
+
+Al trabajar en este capítulo notamos que el entrenamiento en una muestra del
+el conjunto de datos superó al modelo entrenado en el conjunto de datos completo en términos de ROUGE
+puntaje. Esto fue algo sorprendente ya que la validación se perdió monótonamente.
+disminuyó al entrenar el modelo con más datos. Esto es potencialmente
+conectado al hecho de que la pérdida refleja la siguiente calidad de predicción del token,
+que no refleja necesariamente la capacidad de generación de texto.
+Para investigar esto, recorremos diferentes fracciones de una época, afinamos un
+modelo y ejecute la evaluación ROUGE. También guardamos el modelo con los mejores
+Puntuación ROUGE-2.
+
+Ahora podemos trazar las puntuaciones de ROUGE en función de la fracción de época:
+
+Obtenemos las mejores puntuaciones de ROUGE en epochs=0.15 que corresponde a
+aproximadamente 2.000 muestras. La partitura allí se ve mucho mejor que
+los puntajes que obtuvimos al principio, así que el ajuste fino en el conjunto de datos definitivamente valió la pena.
+Finalmente, queremos ver algunos ejemplos de resúmenes que ahora podemos generar
+con el modelo ajustado.
+
+Generación de resúmenes de diálogo
+Al observar las pérdidas y las puntuaciones de ROUGE, parece que el modelo mejoró con respecto al
+modelo original entrenado solo en CNN/DailyMail. Comprobemos de nuevo en el
+muestra del conjunto de prueba que vimos anteriormente:
+
+Diálogo:
+Hannah: Oye, ¿tienes el número de Betty?
+Amanda: déjame revisar
+Ana: <archivo_gif>
+Amanda: Lo siento, no puedo encontrarlo.
+Amanda: Pregúntale a Larry
+Amanda: Él la llamó la última vez que estuvimos juntos en el parque.
+Hannah: no lo conozco bien
+Ana: <archivo_gif>
+Amanda: No seas tímida, es muy simpático.
+ana: si tu lo dices..
+Hannah: Preferiría que le enviaras un mensaje de texto.
+Amanda: Solo envíale un mensaje de texto :)
+Hannah: Urgh... Está bien
+Hannah: Adiós
+amanda: adios
+
+Resumen de referencia:
+Hannah necesita el número de Betty pero Amanda no lo tiene. Ella necesita
+contacto
+> Larry.
+Resumen Modelo:
+Hannah está buscando el número de Betty. Amanda no conoce a Betty
+nuevo número.
+> Larry la llamó la última vez que estuvieron juntos en el parque.
+
+Eso se parece mucho más a la oración de referencia. Parece que el modelo tiene
+aprendido a no sintetizar el diálogo en un resumen sin simplemente extraer
+pasajes Ahora, la prueba definitiva: qué tan bien funciona el modelo en una costumbre
+¿aporte?
+
+Thom: Hola chicos, ¿habéis oído hablar de los transformadores?
+Lewis: ¡Sí, los usé recientemente!
+Leandro: Efectivamente, hay una gran biblioteca de Hugging Face.
+Thom: Lo sé, ayudé a construirlo;)
+Lewis: Genial, tal vez deberíamos escribir un libro al respecto. Qué es lo que tú
+¿pensar?
+Leandro: Gran idea, ¡¿qué tan difícil puede ser?!
+Thom: ¡Estoy dentro!
+Lewis: Impresionante, ¡hagámoslo juntos!

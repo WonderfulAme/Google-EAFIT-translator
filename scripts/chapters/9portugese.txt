@@ -1,0 +1,96 @@
+Capítulo 9. Resumo
+UMA OBSERVAÇÃO PARA LEITORES DE LANÇAMENTOS ANTECIPADOS
+Com os e-books de lançamento antecipado, você obtém os livros em sua forma mais antiga - o
+conteúdo bruto e não editado do autor enquanto eles escrevem - para que você possa
+vantagem dessas tecnologias muito antes do lançamento oficial desses
+títulos.
+Este será o 9º capítulo do livro final. Observe que o GitHub
+repo será ativado mais tarde.
+Se você tiver comentários sobre como podemos melhorar o conteúdo e/ou
+exemplos neste livro, ou se você notar falta de material neste capítulo,
+entre em contato com o editor em mpotter@oreilly.com.
+Em um ponto ou outro, você provavelmente precisou resumir um documento, ser
+trata-se de um artigo de pesquisa, relatório de ganhos financeiros ou discussão de e-mails. Se você acha
+sobre isso, isso requer uma série de habilidades, como entender longas passagens,
+raciocinar sobre o conteúdo e produzir um texto fluente que incorpore o
+principais tópicos do documento. Além disso, resumir uma notícia é muito
+diferente de resumir um contrato legal, portanto, ser capaz de fazê-lo requer um
+grau sofisticado de generalização de domínio. Por esses motivos, o texto
+a sumarização é uma tarefa difícil para modelos de linguagem neural, incluindo
+Transformadores. Apesar desses desafios, a sumarização de texto oferece a perspectiva
+para especialistas de domínio acelerar significativamente seus fluxos de trabalho e é usado por
+empresas para condensar o conhecimento interno, resumir contratos ou
+gerar conteúdo automaticamente para lançamentos em mídias sociais.
+Para entender esses desafios, este capítulo explorará como podemos alavancar
+transformadores pré-treinados para resumir documentos. Vamos começar dando uma olhada
+em um dos conjuntos de dados canônicos para resumo: artigos de notícias do
+Corpus CNN/DailyMail.
+
+O conjunto de dados CNN/DailyMail
+O conjunto de dados CNN/DailyMail consiste em cerca de 300.000 pares de artigos de notícias
+e seus resumos correspondentes, compostos a partir dos pontos que a CNN
+e o DailyMail anexam a seus artigos. Um aspecto importante do conjunto de dados é
+que os resumos são abstrativos e não extrativos, o que significa que eles
+consistem em novas frases em vez de trechos simples. O conjunto de dados também é
+disponível no HuggingFace Dataset Hub, então vamos nos aprofundar e dar uma olhada nele:
+
+
+O conjunto de dados possui três recursos: artigo que contém os artigos de notícias,
+destaques com os resumos e id para identificar exclusivamente cada artigo.
+Vejamos um trecho de um artigo:
+Artigo (trecho de 500 caracteres, comprimento total: 9396):
+É oficial: o presidente dos EUA, Barack Obama, quer que os legisladores avaliem
+em diante
+> se deve usar força militar na Síria. Obama enviou uma carta a
+as cabeças de
+> Câmara e Senado na noite de sábado, horas depois de anunciar
+que ele
+> acredita que uma ação militar contra alvos sírios é o passo certo
+pegar
+> sobre o suposto uso de armas químicas. O proposto
+
+legislação de Obama
+> pede ao Congresso que aprove o uso da força militar "para dissuadir,
+perturbe,
+> prevenir e degradar o potencial para usos futuros de che
+Resumo (comprimento: 294):
+Autoridade síria: Obama subiu no topo da árvore, "não sabe
+como conseguir
+> para baixo"
+Obama envia carta aos chefes da Câmara e do Senado.
+Obama buscará aprovação do Congresso para ação militar contra
+Síria .
+O objetivo é determinar se o CW foi usado, não por quem, diz U.N.
+porta-voz .
+
+Vemos que os artigos podem ser muito longos em comparação com o resumo de destino; em
+neste caso particular, a diferença é de 17 vezes. Artigos longos representam um desafio para
+a maioria dos modelos Transformer, pois o tamanho do contexto geralmente é limitado a 1.000
+tokens ou algo assim, o que equivale a alguns parágrafos de texto. O padrão, ainda
+maneira grosseira de lidar com isso para resumir é simplesmente truncar os textos
+além do tamanho do contexto do modelo. Obviamente, pode haver importantes
+informações para o resumo no final do texto, mas por enquanto precisamos
+conviver com essa limitação das arquiteturas dos modelos.
+
+Pipelines de resumo de texto
+Vamos ver como alguns dos modelos de Transformer mais populares para
+desempenho de sumarização primeiro olhando qualitativamente para as saídas para o
+exemplo acima. Embora as arquiteturas de modelo que iremos explorar tenham
+variando os tamanhos máximos de entrada, vamos restringir o texto de entrada a 2.000 caracteres para
+ter a mesma entrada para todos os modelos e assim tornar as saídas mais
+comparável:
+
+Uma convenção em resumo é separar as sentenças de resumo por um
+nova linha. Poderíamos adicionar um token de nova linha após cada ponto final, mas este simples
+
+a heurística falharia para strings como “U.S.” ou “U.N.”. O pacote nltk inclui
+um algoritmo mais sofisticado que pode diferenciar o final de uma frase de
+pontuação que ocorre em abreviaturas:
+
+['Os EUA são um país.', 'A ONU é uma organização.']
+
+Linha de base de resumo
+Uma linha de base comum para resumir artigos de notícias é simplesmente pegar o primeiro
+três frases de um artigo. Com o tokenizer de sentença do nltk, podemos facilmente
+implementar tal linha de base:
+
