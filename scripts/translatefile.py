@@ -8,6 +8,15 @@ def readfilestr(name):
 		for i in file.readlines():
 			content += str(i)
 	return content
+def readfilelist(name):
+	"""
+	readtxt(name) , return txt content as array ,element by line 
+	"""
+	content = []
+	with open(name, 'r') as file:
+		for i in file.readlines():
+			content.append(str(i).replace("\n",""))
+	return content
 def writetxt(name,content):
 	"""
 	writetxt(name,content) , write in txt file something  
@@ -32,27 +41,23 @@ def webTranslate(txt,writeIn,translateTo):
 	from deep_translator import GoogleTranslator 
 	translatedTxt = GoogleTranslator(source=writeIn, target=translateTo).translate(txt)
 	return translatedTxt
-
 def main():
-	name="chapters/1.txt"
-	newst=""
-	txt=readfilestr(name).replace("\n","").replace(".","\n")
-	maxsize=4999
-	print(len(txt)/maxsize)
-	k=len(txt)/maxsize
-	#for i in range(len(a)/5000):
-	i=0	
-	while True:
+	name="chapters/4new.txt"
+	txt=readfilelist(name)
+	newtxt=""
+	translated="spanish."
+	for i in txt:
 		try:
-			if(math.floor(k)/maxsize<=i):
-				txt=webTranslate(txt[i*maxsize:(i*maxsize)+i%maxsize],"en","pt")
-			else:
-				txt=webTranslate(txt[i*maxsize:(i+1)*maxsize],"en","pt")
-			#if(math.floor(k)+1<i): break
-			
+			newtxt+=webTranslate(i,"en","es")+"\n"
+			print(newtxt)
 		except:
-			break
-		print(txt)
-		i+=1
-	writetxt(name.replace(".","portugese."),txt)#"".join(a))
+			writetxt(name.replace(".",translated),newtxt)#"".join(a))
+			exit()
+	writetxt(name.replace(".",translated),newtxt)#"".join(a))
+def main2():
+	name="chapters/10.txt"
+	a=readfilestr(name).replace("\n","").replace(".","\n")
+	print(a)
+	writetxt("chapters/10new.txt",a)
+
 main()

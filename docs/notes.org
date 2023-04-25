@@ -24,7 +24,7 @@ submit:
 **** reproduccion
 idiomas
 button:mute
-langues
+langues:
 ** datos
 ** bases de datos
 ** whisper

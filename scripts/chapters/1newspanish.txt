@@ -1,0 +1,201 @@
+Capítulo 1
+Hola, TransformersUNA NOTA PARA LOS LECTORES DE LANZAMIENTO TEMPRANO Con los libros electrónicos de lanzamiento anticipado, obtienes libros en su forma más temprana: el contenido sin editar y sin procesar del autor mientras escribe, para que puedas aprovechar estas tecnologías mucho antes del lanzamiento oficial de estos títulos.
+Este sera el 1er capitulo del libro final
+Tenga en cuenta que el repositorio de GitHub se activará más adelante
+Si tiene comentarios sobre cómo podemos mejorar el contenido y/o los ejemplos de este libro, o si nota que falta material en este capítulo, comuníquese con el editor en mpotter@oreilly
+com
+Desde su introducción en 2017, los transformadores se han convertido en el estándar de facto para abordar una amplia gama de tareas de procesamiento de lenguaje natural (NLP) tanto en el ámbito académico como en el industrial.
+Sin darse cuenta, probablemente interactuó con un transformador hoy: Google ahora usa BERT para mejorar su motor de búsqueda al comprender mejor las consultas de búsqueda de los usuarios.
+Del mismo modo, la familia GPT de transformadores de OpenAI ha aparecido repetidamente en los titulares de los principales medios de comunicación por su capacidad para generar texto e imágenes similares a los humanos.
+Estos transformadores ahora potencian aplicaciones como Copilot de GitHub, que, como se muestra en la Figura 1-1, puede convertir un comentario en código fuente que entrena automáticamente una red neuronal para usted. Figura 1-1
+Un ejemplo de GitHub Copilot donde, dada una breve descripción de la tarea, la aplicación proporciona una sugerencia para la función completa (mostrada en gris), completa con comentarios útiles
+Entonces, ¿qué tienen los transformadores que cambiaron el campo casi de la noche a la mañana? Al igual que muchos grandes avances científicos, fue la culminación de varias ideas como la atención, la transferencia del aprendizaje y la ampliación de las redes neuronales que se estaban filtrando en la comunidad investigadora en ese momento.
+Pero un método nuevo y elegante por sí solo no es suficiente para ganar tracción en la industria; también requiere herramientas para hacerlo accesible.
+La biblioteca Hugging Face Transformers y su ecosistema circundante respondieron a esa llamada al ayudar a los profesionales a usar, entrenar y compartir modelos fácilmente, lo que aceleró en gran medida la adopción de transformadores en la industria.
+En la actualidad, más de 1000 empresas utilizan la biblioteca para ejecutar transformadores en producción y, a lo largo de este libro, lo guiaremos sobre cómo entrenar y optimizar estos modelos para aplicaciones prácticas.
+En este capítulo, presentaremos los conceptos básicos que subyacen a la omnipresencia de los transformadores, haremos un recorrido por algunas de las tareas en las que se destacan y concluiremos con una mirada al ecosistema de herramientas y bibliotecas Hugging Face.
+Comencemos nuestro viaje transformador con una breve descripción histórica
+The Transformers Origin StoryEn 2017, los investigadores de Google publicaron un artículo1 que proponía una arquitectura de red neuronal novedosa para el modelado de secuencias.
+Conocida como el Transformador, esta arquitectura superó a las redes neuronales recurrentes (RNN) en tareas de traducción automática, tanto en términos de calidad de traducción como de costo de capacitación.
+Paralelamente, un método efectivo de aprendizaje por transferencia llamado ULMFiT2 mostró que el entrenamiento previo de redes de memoria a largo y corto plazo (LSTM) con un objetivo de modelado de lenguaje en un corpus muy grande y diverso, y luego el ajuste fino en una tarea objetivo podría producir clasificadores de texto robustos con pocos datos etiquetados.
+Estos avances fueron los catalizadores de dos de los transformadores más conocidos en la actualidad: GPT y BERT.
+Al combinar la arquitectura de Transformer con el entrenamiento previo del modelo de lenguaje, estos modelos eliminaron la necesidad de entrenar arquitecturas específicas de tareas desde cero y rompieron casi todos los puntos de referencia en NLP por un margen significativo.
+Desde el lanzamiento de GPT y BERT, ha surgido un gran zoológico de modelos de transformadores y en la Figura 1-2 se muestra una cronología de los eventos recientes.
+Figura 1-2
+La línea de tiempo de los transformadores.
+Pero nos estamos adelantando
+Para comprender qué tiene de novedoso este enfoque que combina conjuntos de datos muy grandes y una arquitectura novedosa: El marco codificador-decodificador Mecanismos de atención Transferencia de aprendizaje Empecemos por observar el marco codificador-decodificador y las arquitecturas que precedieron al surgimiento de los transformadores
+NOTA En este libro usaremos el nombre propio "Transformador" (singular y con la primera letra en mayúscula) para referirnos a la arquitectura de red neuronal original que se presentó en el ahora famoso documento Attention is All You Need.
+Para la clase general de modelos basados ​​en Transformer, usaremos "transformers" (plural y con la primera letra sin mayúsculas) y para la biblioteca Hugging Face usaremos la abreviatura "Transformers" (plural y con la primera letra en mayúsculas)
+¡Esperemos que esto no sea demasiado confuso! El marco codificador-decodificador Antes de los transformadores, los LSTM eran lo último en NLP
+Estas arquitecturas contienen un ciclo o bucle de retroalimentación en las conexiones de red que permite que la información se propague de un paso a otro, lo que las hace ideales para modelar datos secuenciales como el lenguaje.
+Como se ilustra en la imagen de la izquierda de la figura 1-3, un RNN recibe alguna entrada x (que podría ser una palabra o un carácter), la alimenta a través de la red A y genera un valor llamado h llamado estado oculto.
+Al mismo tiempo, el modelo retroalimenta cierta información a sí mismo a través del ciclo de retroalimentación que luego puede usar en el siguiente paso con la entrada x
+Esto se puede ver más claramente si "desenrollamos" el ciclo como se muestra en el lado derecho de la Figura 1-3, donde en cada paso el RNN pasa información sobre su estado a la siguiente operación en la secuencia.
+Esto permite que anRNN realice un seguimiento de la información de los pasos anteriores y la use para sus predicciones de salida.
+POR HACER: Redibujar o hacer referencia a Chris Olah. Estas arquitecturas fueron (y continúan siendo) ampliamente utilizadas para tareas de PNL, procesamiento de voz y series temporales, y puede encontrar una maravillosa exposición de sus capacidades en la publicación de blog de AndrejKarpathy, The Unreasonable Effectiveness of Recurrent Neural Redes
+Un área en la que las RNN jugaron un papel importante fue en el desarrollo de sistemas de traducción automática, donde el objetivo es mapear una secuencia de palabras en un idioma a otro.
+Este tipo de tarea generalmente se aborda con una arquitectura de codificador-decodificador o de secuencia a secuencia,3 que es adecuada para situaciones en las que la entrada y la salida son secuencias de longitud arbitraria.
+Como sugiere el nombre, el trabajo del codificador es codificar la información de la secuencia de entrada en una representación numérica que a menudo se denomina el último estado oculto.
+Luego, este estado se pasa al decodificador, que genera la secuencia de salida
+En general, los componentes codificadores y decodificadores pueden ser cualquier tipo de arquitectura de red neuronal adecuada para modelar secuencias, y este proceso se ilustra para un par de RNN en la Figura 1-4, donde la oración en inglés "¡Los transformadores son geniales!" se convierte en un vector de estado oculto que luego se decodifica para producir la traducción al alemán "Transformer sind grossartig!"
+En esta figura, los cuadros sombreados representan las celdas RNN desenrolladas donde las líneas verticales son los bucles de retroalimentación.
+Los tokens se alimentan secuencialmente a través del modelo y los tokens de salida también se crean secuencialmente de arriba a abajo.
+Aunque elegante en su simplicidad, una debilidad de esta arquitectura es que el estado oculto final del codificador crea un cuello de botella de información: tiene que capturar el significado de toda la secuencia de entrada porque esto es todo a lo que tiene acceso el decodificador cuando genera la salida.
+Esto es especialmente desafiante para secuencias largas donde la información al comienzo de la secuencia podría perderse en el proceso de creación de una única representación fija.
+Afortunadamente, hay una forma de salir de este cuello de botella al permitir que el decodificador tenga acceso a todos los estados ocultos del codificador.
+El mecanismo general para esto se llama atención4 y es un componente clave en muchas arquitecturas de redes neuronales modernas.
+Comprender cómo se desarrolló la atención para las RNN nos ayudará a comprender uno de los principales bloques de construcción del Transformador; echemos un vistazo más profundo
+Mecanismos de atención La idea principal detrás de la atención es que en lugar de producir un solo estado oculto para la secuencia de entrada, el codificador genera un estado oculto en cada paso al que puede acceder el decodificador.
+Sin embargo, usar todos los estados al mismo tiempo crea una entrada enorme para el decodificador, por lo que se necesita algún mecanismo para priorizar qué estados usar.
+Aquí es donde entra la atención: permite que el decodificador asigne un peso o "preste atención" a los estados específicos en el pasado (y la longitud del contexto puede ser muy larga: varios miles de palabras en el pasado para modelos recientes como GPT o reformadores) que son más relevante para producir el siguiente elemento en la secuencia de salida
+¡La mejor parte es que este proceso es diferenciable, por lo que el proceso de "prestar atención" se puede aprender durante el entrenamiento!
+Figura 1-5
+Arquitectura codificador-decodificador con un mecanismo de atención para un par de RNN
+El papel de la atención se muestra para predecir el tercer token en la secuencia de salida
+La arquitectura Transformer llevó esta idea varios pasos más allá y reemplazó las unidades recurrentes dentro del codificador y decodificador por completo con capas de autoatención y redes simples de avance. Como se ilustra en la Figura 1-6, todos los tokens se alimentan en paralelo a través del modelo y el mecanismo de autoatención opera en todos los estados de la misma capa.
+Compare esto con el caso RNN en la Figura 1-5, donde los tokens de entrada se alimentan secuencialmente a través del modelo y la atención opera entre los estados de un decodificador y todos los estados del codificador.
+Pasar de un procesamiento secuencial a un procesamiento completamente paralelo desbloqueó fuertes ganancias de eficiencia computacional, lo que permitió entrenar en corpus de órdenes de magnitud más grandes por el mismo costo computacional
+Al mismo tiempo, la eliminación del cuello de botella del procesamiento secuencial de la información hace que la arquitectura del transformador sea más eficiente en varias tareas que requieren agregar información durante largos períodos de tiempo.
+Otra característica deseable de la autoatención es que crea una representación para cada ficha que depende de las fichas que la rodean.
+Esto hace que la representación de cada token tenga en cuenta el contexto, de modo que la representación de la palabra "manzana" (fruta) es diferente de "manzana" (fabricante de computadoras)
+Esta característica no es novedosa sobre la arquitectura del transformador y las arquitecturas anteriores como ELMo5 también usaban representaciones contextualizadas.
+La actualización de las representaciones de los tokens con redes de autoatención y feed-forward se repite luego en varias capas o "bloques" para producir una codificación rica que se combina con las entradas del decodificador.
+Estas capas son similares para la parte del codificador y el decodificador de la arquitectura del transformador y veremos más de cerca su funcionamiento interno en el Capítulo 3.
+Abandonar la recurrencia y reemplazarla con redes de autoatención y feed-forward también mejora en gran medida la eficiencia computacional de los modelos de transformadores.
+La investigación sobre las leyes de escala de los modelos de aprendizaje profundo ha revelado que los modelos más grandes entrenados con más datos en muchos casos producen mejores resultados.
+La escalabilidad de los transformadores permite la explotación total de las leyes de escalamiento, lo que ha iniciado una carrera de escalamiento de modelos NLP.
+Pero escalar modelos tiene el precio de requerir grandes cantidades de datos de entrenamiento.
+Cuando trabajamos en aplicaciones prácticas de PNL, generalmente no tenemos acceso a grandes cantidades de datos textuales para entrenar modelos tan grandes en
+Faltaba una pieza final para que comenzara la revolución de los transformadores: el aprendizaje por transferencia
+Transferencia de aprendizaje en NLP Es una práctica común en la visión por computadora utilizar la transferencia de aprendizaje para entrenar una red neuronal convolucional como ResNet en una tarea y luego adaptarla o ajustarla en una nueva tarea, haciendo uso del conocimiento aprendido en la tarea original.
+Arquitectónicamente, esto suele funcionar dividiendo el modelo en términos de un cuerpo y una cabeza, donde la cabeza es una red de tareas específicas.
+Durante el preentrenamiento, los pesos del cuerpo aprenden características generales del dominio de origen, y son estos pesos los que se utilizan para inicializar el nuevo modelo para la nueva tarea.
+En comparación con el aprendizaje supervisado tradicional, este enfoque generalmente produce modelos de alta calidad que se pueden entrenar de manera mucho más eficiente en una variedad de tareas posteriores y con muchos menos datos etiquetados.
+En la Figura 1-7 se muestra una comparación de los dos enfoques.
+En visión por computadora, los modelos se entrenan primero en conjuntos de datos a gran escala como ImageNet, que contienen millones de imágenes.
+Este proceso se llama preentrenamiento y su objetivo principal es enseñarle al modelo las características básicas de las imágenes, como los bordes y los filtros.
+Estos modelos previamente entrenados se pueden ajustar en una tarea posterior, como una clasificación de rayos X con menos de mil ejemplos, y aún así lograr una mayor precisión que entrenar un modelo desde cero.
+Aunque el aprendizaje por transferencia fue el enfoque estándar en la visión por computadora durante varios años, no estaba claro cuál era el proceso de preentrenamiento análogo para la PNL porque el lenguaje es inherentemente más variado y complejo que los píxeles de una imagen 2D.
+Como resultado, las aplicaciones NLP generalmente requerían grandes cantidades de datos etiquetados para lograr un alto rendimiento, e incluso entonces ese rendimiento no se comparaba con lo que se lograba en el dominio de la visión.
+En 2017 y 2018, varios trabajos de investigación propusieron nuevos enfoques que finalmente descifraron el aprendizaje de transferencia para la PNL, comenzando desde la prueba de concepto temprana con desempeños sólidos en una tarea de clasificación de sentimientos del entrenamiento previo no supervisado solo en abril de 20176 antes de que se publicaran dos trabajos simultáneos de gran impacto a principios de 2018 que muestran ganancias significativas en puntos de referencia comunes con entrenamiento previo no supervisado: ULMFiT7 y ELMo
+Como se ilustra en la Figura 1-8, ULMFiT consta de tres pasos principales: Preentrenamiento El objetivo de entrenamiento inicial es bastante simple: predecir la siguiente palabra en función de las palabras anteriores, que es una tarea también conocida como modelado del lenguaje.
+La elegancia de este enfoque radica en el hecho de que no se necesitan datos etiquetados y se puede hacer uso de abundante texto disponible de fuentes como Wikipedia.
+Adaptación del dominio Una vez que el modelo de lenguaje se entrena previamente en un corpus a gran escala, el siguiente paso es adaptarlo en el corpus del dominio, ajustando los pesos del modelo de lenguaje.
+Ajuste fino En este paso, el modelo de lenguaje se ajusta con una capa de clasificación para la tarea de destino (i
+mi
+clasificando el sentimiento de las reseñas de películas en la Figura 1-8)
+El ajuste fino requiere órdenes de magnitud menos tiempo, cálculo y datos etiquetados en comparación con el entrenamiento de un clasificador desde cero, lo que lo convirtió en un gran avance para la PNL aplicada.
+Al introducir un marco viable para la formación previa y la transferencia de aprendizaje en PNL, ULMFiT proporcionó la pieza que faltaba para que los transformadores despegaran.
+Soon after and closely followingeach other, GPT and BERT were released which combined self-attention and transfer learningbut with a slightly different take: GPT used only the transformer decoder and the samelanguage modeling approach from ULMFiT, while BERT used the encoder part with a specialform of modelado de lenguaje llamado modelado de lenguaje enmascarado
+El objetivo del modelado de lenguaje enmascarado es predecir tokens enmascarados aleatoriamente en un texto similar a los textos de brecha de la escuela.
+GPT y BERT establecieron un nuevo estado del arte en una variedad de puntos de referencia de NLP y marcaron el comienzo de la era de los transformadores
+Otro factor más catalizó el impacto exponencial de estos modelos: fácil disponibilidad en una base de código común
+La investigación y el desarrollo de estos modelos estuvieron a cargo de laboratorios de investigación de la competencia que utilizaron marcos diferentes e incompatibles (PyTorch, Tensorflow, etc.) y, como consecuencia, el código base de cada modelo tenía su propia API e idiosincrasia, lo que creaba una barrera sustancial para que los profesionales integraran fácilmente estos modelos en su propia aplicación
+Con el lanzamiento de Hugging Face Transformers, se construyó progresivamente una API unificada en más de 50 arquitecturas y tres marcos interoperables (PyTorch, TensorFlow y Jax) que, al principio, catalizó la investigación en estos modelos y rápidamente llegó a los profesionales de PNL, lo que facilita para integrar estos modelos en muchas aplicaciones de la vida real hoy
+¡Echémosle un vistazo! Transformadores que abrazan la cara: cerrando la brecha Aplicar una nueva arquitectura de aprendizaje automático a una nueva tarea puede ser una tarea complicada y, por lo general, implica los siguientes pasos: Implementar la arquitectura del modelo en el código, normalmente en PyTorch o TensorFlow; Cargar los pesos preentrenados (si está disponible) desde un servidor; Preprocesar las entradas, pasarlas a través del modelo y aplicar algún procesamiento posterior específico de la tarea; Implementar cargadores de datos y definir funciones de pérdida y optimizadores para entrenar el modelo
+Cada uno de estos pasos requiere una lógica personalizada para cada modelo y tarea
+Tradicionalmente, los equipos de investigación que publican un nuevo modelo suelen publicar parte del código (¡pero no siempre!) junto con los pesos del modelo.
+Sin embargo, este código rara vez está estandarizado y requiere días de ingeniería para adaptarse a nuevos casos de uso.
+Aquí es donde la biblioteca de Transformers acudió al rescate del profesional de PNL: proporciona una interfaz estandarizada para una amplia gama de modelos de transformadores, así como código y herramientas para adaptar estos modelos a nuevos casos de uso.
+La biblioteca integra todos los principales marcos de aprendizaje profundo, como TensorFlow, PyTorch o JAX, y le permite cambiar entre ellos.
+Además, proporciona "cabezales" específicos de tareas para que pueda ajustar fácilmente los transformadores en tareas posteriores, como la clasificación, el reconocimiento de entidades nombradas, la respuesta a preguntas, etc.
+junto con módulos para capacitarlos
+¡Esto reduce el tiempo para que un profesional entrene y pruebe un puñado de modelos de una semana a una sola tarde! Compruébelo usted mismo en la siguiente sección, donde mostramos que con solo unas pocas líneas de código, la biblioteca de Transformers se puede aplicar para abordar algunos de las aplicaciones de PNL más comunes que es probable que encuentres en la naturaleza
+Un recorrido por las aplicaciones de transformadores Según su aplicación, este texto podría ser un contrato legal, una descripción del producto o algo completamente diferente
+En el caso de los comentarios de los clientes, probablemente le gustaría saber si los comentarios son positivos o negativos.
+Esta tarea se llama análisis de opinión y es parte del tema más amplio de clasificación de texto que exploraremos en >
+Por ahora, echemos un vistazo a lo que se necesita para extraer el sentimiento de nuestro texto usando la biblioteca de Transformers.
+Clasificación de texto Como veremos en capítulos posteriores, Transformers tiene una API en capas que le permite interactuar con la biblioteca en varios niveles de abstracción.
+En este capítulo, comenzaremos con las canalizaciones API de más alto nivel, que abstraen todos los pasos necesarios para convertir texto sin formato en un conjunto de predicciones a partir de un modelo ajustado.
+La primera vez que ejecute este código, verá que aparecen algunas barras de progreso porque la canalización descarga automáticamente los pesos del modelo de Hugging Face Hub.
+La segunda vez que cree una instancia de la canalización, la biblioteca notará que ya descargó los pesos y utilizará la versión almacenada en caché en su lugar.
+De forma predeterminada, la canalización de análisis de opiniones utiliza un modelo que se ajustó en el Stanford Sentiment Treebank, que es un corpus en inglés de reseñas de películas anotadas.
+Ahora que tenemos nuestra canalización, ¡generemos algunas predicciones! Cada tubería toma una cadena de texto (o una lista de cadenas) como entrada y devuelve una lista de predicciones
+Cada predicción es un Pythondictionary, por lo que podemos usar Pandas para mostrarlos bien como un DataFramelabelscoreNEGATIVEEn este caso, el modelo está muy seguro de que el texto tiene un sentimiento negativo, ¡lo cual tiene sentido dado que estamos lidiando con una queja de un Autobot furioso!Vamos ahora eche un vistazo a otra tarea común llamada reconocimiento de entidad nombrada
+Reconocimiento de entidad nombrada Predecir el sentimiento de los comentarios de los clientes es un buen primer paso, pero a menudo desea saber si los comentarios se refieren a un producto o servicio en particular.
+Los nombres de productos, lugares o personas se denominan entidades nombradas y su detección y extracción del texto se denomina reconocimiento de entidades nombradas (NER).
+Podemos aplicar NER girando la canalización correspondiente y alimentándola con nuestro fragmento de texto. Puede ver que la canalización detectó todas las entidades y también les asignó una categoría como ORG (organización), LOC (ubicación) o PER (persona).
+Aquí usamos el argumento estrategia_agregación para agrupar las palabras de acuerdo con las predicciones del modelo; por ejemplo, "Optimus Prime" tiene dos palabras pero se le asigna una sola categoría MISC (miscelánea)
+Los puntajes nos dicen cuán confiado estaba el modelo sobre la entidad y podemos ver que tenía menos confianza sobre "Decepticons" y la primera aparición de "Megatron", los cuales no logró agrupar como una sola entidad.
+Es bueno extraer todas las entidades nombradas, pero a veces nos gustaría hacer preguntas más específicas
+Aquí es donde podemos usar la respuesta a preguntas.
+Respuesta a preguntas En la respuesta a preguntas proporcionamos al modelo un pasaje de texto llamado contexto, junto con una pregunta cuya respuesta nos gustaría extraer.
+Luego, el modelo devuelve el intervalo de texto correspondiente a la respuesta.
+Entonces, veamos qué obtenemos cuando hacemos una pregunta específica sobre el texto.
+Podemos ver que junto con la respuesta, la canalización también devolvió números enteros de inicio y fin que corresponden a los índices de caracteres donde se encontró el intervalo de respuesta
+Hay varios tipos de respuesta a preguntas que investigaremos más adelante en el Capítulo 4, pero este tipo particular se llama respuesta extractiva a preguntas porque la respuesta se extrae directamente del texto.
+Con este enfoque, puede leer y extraer información relevante rápidamente de los comentarios de un cliente.
+Pero, ¿qué sucede si recibe una montaña de quejas prolijas y no tiene tiempo para leerlas todas? ¡Veamos si un modelo de resumen puede ayudar! Resumen El objetivo del resumen de texto es tomar un texto largo como entrada y generar una versión corta con todos los hechos relevantes.
+Esta es una tarea mucho más complicada que las anteriores ya que requiere >Alemania
+Desafortunadamente, cuando abrí el paquete, descubrí con horror que me habían enviado una figura de acción de Megatron en su lugar.
+¡Esto no es tan malo! Aunque se han copiado y pegado partes del texto original, el modelo ha podido identificar correctamente que “Bumblebee” (que aparecía al final) era el autor de la denuncia y ha captado la esencia del problema.
+En este ejemplo, también puede ver que pasamos algunos argumentos de palabras clave como max_length y clean_up_tokenization_spaces a la canalización que nos permiten modificar los resultados en tiempo de ejecución.
+Pero, ¿qué sucede cuando recibes un comentario en un idioma que no entiendes? ¡Puede usar Google Translate o puede usar su propio transformador para traducirlo por usted! Traducción Al igual que el resumen, la traducción es una tarea en la que el resultado consiste en texto generado.
+Usemos la canalización de traducción para traducir el texto en inglés al alemán.
+Nuevamente, el modelo ha producido una muy buena traducción que usa correctamente los pronombres formales como “Ihrem” y “Sie” en alemán. Aquí también mostramos cómo puede anular el modelo predeterminado en la canalización para elegir el mejor para su aplicación, y puede encontrar modelos en miles de pares de idiomas en el Hub
+Antes de dar un paso atrás y mirar todo el ecosistema Hugging Face
+veamos una última aplicación con generación de texto
+Generación de texto Digamos que le gustaría escribir respuestas más rápidas a los comentarios de los clientes al tener acceso a una función de autocompletar
+Con un modelo de generación de texto, puede continuar con un texto de entrada de la siguiente manera: De acuerdo, tal vez no querríamos usar esta finalización para calmar a Bumblebee, pero entiende la idea general.
+Ahora que hemos visto algunas aplicaciones geniales de los modelos de transformadores, es posible que se pregunte dónde ocurre el entrenamiento. Todos los modelos que usamos en este capítulo estaban disponibles públicamente y ya estaban ajustados para cada tarea.
+En general, sin embargo, querrá ajustar los modelos con sus propios datos y en los siguientes capítulos aprenderá cómo hacerlo.
+Pero entrenar a un modelo es solo una pequeña parte de cualquier proyecto de PNL: ser capaz de procesar datos de manera eficiente, compartir resultados con colegas y hacer que su trabajo sea reproducible también son componentes clave.
+Afortunadamente, la biblioteca de Transformers también está rodeada por un gran ecosistema de herramientas útiles que respaldan gran parte del flujo de trabajo de aprendizaje automático moderno.
+Echemos un vistazo
+El ecosistema Hugging Face Lo que comenzó con la biblioteca de Transformers se ha convertido rápidamente en un ecosistema Hugging Face completo que consta de muchas bibliotecas y herramientas para acelerar sus proyectos de aprendizaje automático y PNL.
+En esta sección, veremos brevemente los diversos componentes
+El ecosistema Hugging Face consta principalmente de dos partes: una familia de bibliotecas y el Hub, como se muestra en la Figura 1-9
+Las bibliotecas proporcionan el código, mientras que Hub proporciona los pesos preentrenados, los conjuntos de datos, las métricas de evaluación y más.
+Echemos un vistazo a cada componente.
+Nos saltaremos la biblioteca de Transformers, ya que ya la discutimos, y veremos mucho más a lo largo del libro.
+The Hugging Face HubComo se mencionó anteriormente, el aprendizaje por transferencia es uno de los factores clave que impulsan el éxito de los transformadores porque permite reutilizar modelos previamente entrenados para nuevas tareas.
+En consecuencia, es crucial poder cargar modelos previamente entrenados rápidamente y ejecutar experimentos con ellos.
+En Hugging Face Hub puede encontrar más de 10,000 modelos que están alojados y disponibles gratuitamente
+Como se muestra en la Figura 1-10, hay muchos atributos y filtros para tareas, idioma, tamaño que están diseñados para ayudarlo a navegar y encontrar rápidamente candidatos prometedores.
+Como hemos visto con las canalizaciones, cargar un modelo prometedor en su código es, literalmente, solo una línea de código de distancia.
+Esto hace que la experimentación con una amplia gama de modelos sea liviana y le permite concentrarse en las partes específicas del dominio de su proyecto.
+Además de las ponderaciones del modelo, The Hub también alberga conjuntos de datos y métricas que le permiten producir resultados publicados o aprovechar datos adicionales para su aplicación.
+El Hub también proporciona tarjetas de modelos y conjuntos de datos para documentar su contenido y ayudarlo a tomar una decisión informada si el modelo o conjunto de datos es el adecuado para usted.
+Una de las características más interesantes del Hub es que puede probar cualquier modelo directamente a través de varios widgets específicos de tareas que le permiten interactuar con los modelos como se muestra en la Figura 1-11.
+Continuemos el recorrido con la biblioteca Hugging Face Tokenizers
+Hugging Face TokenizersDetrás de cada uno de los ejemplos de tubería que vimos anteriormente había un paso de tokenización que divide el texto sin procesar en piezas más pequeñas llamadas tokens
+Veremos cómo funciona esto en detalle en el Capítulo 2, pero por ahora es suficiente para comprender que un token puede ser una palabra, parte de una palabra o simplemente caracteres como la puntuación.
+Los transformadores están entrenados en representaciones numéricas de estos tokens, por lo que dar este paso correctamente es muy importante para todo el proyecto NLP. La biblioteca Hugging Face Tokenizers proporciona muchas estrategias de tokenización y es extremadamente rápida para tokenizar texto gracias a su backend Rust
+Además, también se ocupa de todo el procesamiento previo y posterior dependiente del modelo, como la normalización de las entradas y la transformación de las salidas del modelo al formato requerido.
+Con Tokenizers podemos cargar un tokenizer de la misma manera que podemos cargar pesos de modelos previamente entrenados con Transformers
+Naturalmente, necesitamos un conjunto de datos y métricas para entrenar y evaluar modelos, así que echemos un vistazo a la biblioteca Hugging Face Datasets que está a cargo de ese aspecto.
+Hugging Face Conjuntos de datos Cargar, procesar y almacenar conjuntos de datos puede ser un proceso engorroso, especialmente cuando los conjuntos de datos son demasiado grandes para caber en la memoria RAM de su computadora portátil
+Además, normalmente necesita implementar varios scripts para descargar los datos y transformarlos en un formato estándar
+La biblioteca Hugging Face Datasets simplifica este proceso al proporcionar una interfaz estándar para miles de conjuntos de datos que se pueden encontrar en el Hub.
+También proporciona almacenamiento en caché inteligente (para que no tenga que rehacer el preprocesamiento cada vez que ejecuta su código) y evita las limitaciones de RAM al aprovechar un mecanismo especial llamado mapeo de memoria que almacena el contenido de un archivo en memoria virtual y permite múltiples procesos para modificar un archivo. más eficientemente
+La biblioteca también es interoperable con marcos populares como Pandas y NumPy, por lo que no tiene que abandonar la comodidad de sus herramientas favoritas de gestión de datos.
+Sin embargo, tener un buen conjunto de datos y un modelo poderoso no vale nada si no puede medir el rendimiento de manera confiable.
+Desafortunadamente, las métricas clásicas de PNL vienen con muchas implementaciones diferentes que pueden variar ligeramente y, por lo tanto, conducir a resultados engañosos.
+Al proporcionar los scripts para muchas métricas, la biblioteca de conjuntos de datos ayuda a que los experimentos sean más reproducibles y los resultados sean más confiables.
+¡Con las bibliotecas Tokenizers, Transformers y Datasets tenemos todo lo que necesitamos para crear un proyecto NLP! Sin embargo, una vez que comenzamos a escalar de una sola GPU a muchas o cuando hacemos la transición a las TPU, probablemente tengamos que refactorizar una gran fracción de la lógica de entrenamiento.
+Ahí es donde entra en juego la última biblioteca de los ecosistemas: Hugging Face Accelerate
+Hugging Face Accelerate Un ciclo de vida habitual de un proyecto de ML va desde la creación de un prototipo ejecutable en su máquina local hasta el entrenamiento de un modelo de tamaño pequeño a mediano en una sola GPU en una máquina dedicada hasta el entrenamiento de un modelo grande en una máquina con varias GPU o un clúster y, a veces, incluso la transición a la formación de TPU
+Cada una de estas infraestructuras requiere un código personalizado para funcionar sin problemas y de manera eficiente, lo que provoca muchos ajustes al cambiar la infraestructura y solo un dolor de cabeza en general.
+La biblioteca Hugging Face Accelerate agrega una capa de abstracción a sus ciclos de entrenamiento normales que se encarga de toda la lógica personalizada necesaria para la infraestructura de entrenamiento.
+Esto literalmente acelera su flujo de trabajo al simplificar el cambio de infraestructura cuando sea necesario
+Encontraremos esta biblioteca en AGREGAR REF
+Principales desafíos con los transformadores En este capítulo hemos echado un vistazo a la amplia gama de tareas de PNL que se pueden abordar con los modelos de transformadores y, al leer los titulares de los medios, a veces puede parecer que sus capacidades son ilimitadas.
+Sin embargo, a pesar de su utilidad, los transformadores están lejos de ser una panacea, y enumeramos aquí algunos desafíos asociados con ellos que exploraremos a lo largo del libro: Barrera del idioma La investigación sobre transformadores está dominada por el idioma inglés.
+Hay varios modelos para otros idiomas, pero es más difícil encontrar modelos preentrenados para idiomas raros o de bajos recursos.
+En el Capítulo 6, exploramos los transformadores multilingües y su capacidad para realizar transferencias entre idiomas sin disparo.
+Hambre de datosAunque podemos usar el aprendizaje por transferencia para reducir drásticamente la cantidad de datos de entrenamiento etiquetados, todavía es mucho en comparación con los estándares humanos
+Abordar escenarios en los que tiene poca o ninguna información etiquetada es el tema del Capítulo 7
+Documentos largos La atención funciona extremadamente bien en textos de párrafos largos, pero se vuelve muy costosa cuando pasamos a textos más largos como documentos completos.
+Los enfoques para mitigar esto se analizan en el Capítulo 11.
+Cajas negras Al igual que con otros modelos de aprendizaje profundo, los transformadores son en gran medida cajas negras.
+Es difícil o imposible desentrañar “por qué” un modelo hizo una determinada predicción
+Este es un desafío especialmente difícil cuando estos modelos se implementan para tomar decisiones críticas.
+Los modelos BiasesTransformer están predominantemente preentrenados en datos de texto de Internet, lo que imprime todos los sesgos que están presentes en los datos en los modelos.
+Asegurarse de que no sean racistas, sexistas o algo peor es una tarea desafiante.
+Discutimos algunos de estos temas en más detalle en AGREGAR REF
+Aunque abrumadores, muchos de estos desafíos se pueden superar y volveremos a tocar estos temas en casi todos los capítulos siguientes.
+Conclusión ¡Esperemos que ahora esté entusiasmado por aprender a entrenar e integrar estos modelos versátiles en sus propias aplicaciones! Hemos visto en este capítulo que puede usar modelos de última generación para la clasificación, el reconocimiento de entidades nombradas, la respuesta a preguntas y modelos de resumen en unas pocas líneas de código, pero esto es solo la punta del iceberg.
+En los siguientes capítulos, aprenderá cómo adaptar el transformador para una amplia gama de casos de uso, ya sea construyendo un clasificador simple, un modelo liviano para producción e incluso capacitando un modelo de lenguaje desde cero.
+Tomaremos un enfoque práctico, lo que significa que para cada concepto habrá un código adjunto que puede ejecutar en Google Colab o en su propia máquina GPU.
+Ahora que estamos armados con los conceptos básicos detrás de los transformadores, es hora de ensuciarse las manos con nuestra primera aplicación: clasificación de texto

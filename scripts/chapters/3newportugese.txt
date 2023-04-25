@@ -1,0 +1,305 @@
+Capítulo 3
+Transformer Anatomy UMA OBSERVAÇÃO PARA LEITORES DE LANÇAMENTO ANTERIOR Com os e-books de lançamento antecipado, você obtém os livros em sua forma mais antiga - o conteúdo bruto e não editado do autor conforme eles escrevem - para que você possa aproveitar essas tecnologias muito antes do lançamento oficial desses títulos
+Este será o 3º capítulo do último livro
+Observe que o repositório do GitHub será ativado mais tarde
+Se você tiver comentários sobre como podemos melhorar o conteúdo e/ou os exemplos deste livro, ou se notar falta de material neste capítulo, entre em contato com o editor em mpotter@oreilly
+com
+Agora que vimos o que é necessário para ajustar e avaliar um transformador no Capítulo 2, vamos dar uma olhada em como eles funcionam internamente.
+Neste capítulo, exploraremos como são os principais blocos de construção dos modelos de transformadores e como implementá-los usando o PyTorch
+Primeiro nos concentramos na construção do mecanismo de atenção e, em seguida, adicionamos os bits e as peças necessárias para fazer um codificador de transformador funcionar
+Também damos uma breve olhada nas diferenças arquitetônicas entre os módulos codificador e decodificador
+Ao final deste capítulo, você será capaz de implementar um modelo simples de transformador por conta própria! Embora um entendimento técnico profundo da arquitetura do transformador geralmente não seja necessário para usar a biblioteca Transformers e ajustar modelos para seu caso de uso, isso pode ajudar a entender e navegue pelas limitações da arquitetura ou expanda-a para novos domínios
+Este capítulo também apresenta uma taxonomia de transformadores para nos ajudar a entender o verdadeiro zoológico de modelos que surgiu nos últimos anos
+Antes de mergulhar no código, vamos começar com uma visão geral da arquitetura original que deu início à revolução do transformador
+O Transformer Como vimos no Capítulo 1, o Transformer original é baseado na arquitetura do codificador-decodificador, amplamente utilizada para tarefas como tradução automática, em que uma sequência de palavras é traduzida de um idioma para outro
+Essa arquitetura consiste em dois componentes: CodificadorConverte uma sequência de entrada de tokens em uma sequência de vetores de incorporação, geralmente chamada de estado oculto ou contexto
+DecodificadorUsa o estado oculto do codificador para gerar iterativamente uma sequência de saída de tokens, um token por vez
+Antes da chegada dos transformadores, os blocos de construção do codificador e do decodificador eram tipicamente redes neurais recorrentes, como LSTMs,1 aumentadas com um mecanismo chamado atenção
+2 Em vez de usar um estado fixo oculto para toda a sequência de entrada, a atenção permitiu que o decodificador atribuísse uma quantidade diferente de peso ou “atenção” a cada um dos estados do codificador em cada intervalo de tempo de decodificação
+Ao se concentrar em quais tokens de entrada são mais relevantes em cada passo de tempo, esses modelos foram capazes de aprender alinhamentos não triviais entre as palavras em uma tradução gerada e aquelas em uma frase de origem
+Por exemplo, a Figura 3-1 visualiza os pesos de atenção para um modelo de tradução de inglês para francês e mostra como o decodificador pode alinhar corretamente as palavras “zona” e “área”, que são ordenadas de forma diferente nos dois idiomas
+Figura 3-1
+Codificador-decodificador RNN alinhamento de palavras no idioma de origem (inglês) e tradução gerada (francês), onde cada pixel denota um peso de atenção
+Embora a atenção tenha produzido traduções muito melhores, ainda havia uma grande falha no uso de modelos recorrentes para o codificador e o decodificador: os cálculos são inerentemente sequenciais, o que evita a paralelização entre tokens na sequência de entrada
+Com o Transformer, um novo paradigma de modelagem foi introduzido: dispensar completamente a recorrência e, em vez disso, confiar inteiramente em uma forma especial de atenção chamada autoatenção.
+Abordaremos a autoatenção com mais detalhes posteriormente, mas, em termos simples, é como a atenção, exceto pelo fato de operar em estados ocultos do mesmo tipo.
+Portanto, embora os blocos de construção tenham mudado no Transformer, a arquitetura geral permaneceu a de um codificador-decodificador mostrado na Figura 3-2
+Essa arquitetura pode ser treinada para convergência mais rapidamente do que os modelos recorrentes e abriu caminho para muitos dos avanços recentes em PNL
+Figura 3-2
+Arquitetura do codificador-decodificador do Transformer, com o codificador mostrado na metade superior da figura e o decodificador na metade inferior
+Veremos cada um dos blocos de construção em detalhes em breve, mas já podemos ver algumas coisas na Figura 3-2 que caracterizam a arquitetura Transformer: O texto de entrada é tokenizado e convertido em token embeddings usando as técnicas que encontramos no Capítulo 2
+Como o mecanismo de atenção não está ciente das posições relativas dos tokens, precisamos de uma maneira de injetar algumas informações sobre as posições dos tokens na entrada para modelar a natureza sequencial do texto
+As incorporações de token são, portanto, combinadas com incorporações posicionais que contêm informações posicionais para cada token
+O codificador consiste em uma pilha de camadas de codificador ou “blocos” que é análogo ao empilhamento de camadas convolucionais em visão computacional
+O mesmo é verdadeiro para o decodificador que tem sua própria pilha de camadas de decodificador
+A saída do codificador é alimentada para cada camada do decodificador, que então gera uma previsão para o próximo token mais provável na sequência
+A saída desta etapa é então alimentada de volta ao decodificador para gerar o próximo token e assim por diante até que um token especial de fim de sequência seja alcançado
+A arquitetura do Transformer foi originalmente projetada para tarefas de sequência a sequência, como tradução automática, mas os submódulos do codificador e do decodificador logo foram adaptados como modelos autônomos
+Embora existam centenas de modelos de transformadores diferentes, a maioria deles pertence a um dos três tipos: Somente codificador Esses modelos convertem uma sequência de entrada de texto em uma representação numérica avançada que é adequada para tarefas como classificação de texto ou reconhecimento de entidade nomeada
+BERT e suas variantes como RoBERTa e DistilBERT pertencem a esta classe de arquiteturas
+Somente decodificador Dado um prompt de texto como "Obrigado pelo almoço, eu comi um...", esses modelos completarão automaticamente a sequência prevendo iterativamente a próxima palavra mais provável
+A família de modelos GPT pertence a esta classe
+Codificador-decodificadorUsado para modelar mapeamentos complexos de uma sequência de texto para outra
+Adequado para tradução automática e resumo
+Os modelos Transformer, BART e T5 pertencem a esta classe
+OBSERVAÇÃONa realidade, a distinção entre aplicativos para arquiteturas apenas de decodificador versus somente de codificador é um pouco confusa
+Por exemplo, modelos apenas de decodificador como os da família GPT podem ser preparados para tarefas como tradução que são convencionalmente consideradas como uma tarefa de sequência para sequência
+Da mesma forma, modelos somente de codificador, como o BERT, podem ser aplicados a tarefas de resumo geralmente associadas a modelos de codificador-decodificador ou somente decodificador
+3Agora que temos uma compreensão de alto nível da arquitetura Transformer, vamos dar uma olhada mais de perto no funcionamento interno do codificador
+Transformer EncoderComo vimos anteriormente, o codificador do Transformer consiste em muitos encoderlayers empilhados um ao lado do outro
+Conforme ilustrado na Figura 3-3, cada camada de codificador recebe uma sequência de embeddings e os alimenta através das seguintes subcamadas: Uma camada de auto-atenção de várias cabeças
+Uma camada de avanço
+Os embeddings de saída de cada camada do encoder têm o mesmo tamanho que os inputs e logo veremos que o principal papel da pilha do encoder é “atualizar” os embeddings de entrada para produzir representações que codificam alguma informação contextual na sequência
+Figura 3-3
+Zoom na camada do codificador
+Cada uma dessas subcamadas também possui uma conexão de salto e normalização de camada, que são truques padrão para treinar redes neurais profundas de maneira eficaz
+Mas para entender verdadeiramente o que faz um transformador funcionar, temos que ir mais fundo
+Vamos começar com o bloco de construção mais importante: a camada de auto-atenção
+Autoatenção Como discutimos anteriormente neste capítulo, a autoatenção é um mecanismo que permite que as redes neurais atribuam uma quantidade diferente de peso ou “atenção” a cada elemento em uma sequência
+Para sequências de texto, os elementos são incorporações de token como aquelas que encontramos no Capítulo 2, onde cada token é mapeado para um vetor de alguma dimensão fixa
+Por exemplo, no BERT cada token é representado como um vetor de 768 dimensões
+A parte “auto” da autoatenção refere-se ao fato de que esses pesos são calculados para todos os estados ocultos no mesmo conjunto, e
+g
+todos os estados ocultos do codificador
+Por outro lado, o mecanismo de atenção associado aos modelos recorrentes envolve calcular a relevância de cada estado oculto do codificador para o estado oculto do decodificador em um determinado intervalo de tempo de decodificação
+A ideia principal por trás da autoatenção é que, em vez de usar uma incorporação fixa para cada token, podemos usar toda a sequência para calcular uma média ponderada de cada incorporação
+Uma maneira simplificada de formular isso é dizer que, dada uma sequência de incorporações de token x ,
+
+
+, x , auto-atenção produz uma sequência de novos embeddings y ,
+
+
+, y onde cada y é uma combinação linear de todos os x :Os coeficientes w são chamados de pesos de atenção e são normalizados de modo que Para ver por que a média dos embeddings de token pode ser uma boa ideia, considere o que vem à sua mente quando você vê a palavra “moscas”
+Você pode pensar em um inseto irritante, mas se receber mais contexto como “o tempo voa como uma flecha”, você perceberá que “voa” refere-se ao verbo.
+Da mesma forma, podemos criar uma representação para “moscas” que incorpore esse contexto combinando todas as incorporações de token em diferentes proporções, talvez atribuindo um peso maior w às incorporações de token para “tempo” e “seta”
+Embeddings gerados dessa maneira são chamados de embeddings contextualizados e são anteriores à invenção de transformadores com modelos de linguagem como ELMo4
+Um desenho animado do processo é mostrado na Figura 3-4, onde ilustramos como, dependendo do contexto, duas representações diferentes para “moscas” podem ser geradas por meio da autoatenção
+Figura 3-4
+Desenho animado de como a auto-atenção atualiza as incorporações de token bruto (superior) em incorporações contextualizadas (inferior) para criar representações que incorporam informações de toda a sequência
+Vamos agora dar uma olhada em como podemos calcular os pesos de atenção
+Atenção de produto escalado Existem várias maneiras de implementar uma camada de autoatenção, mas a mais comum é a atenção de produto escalado do artigo Atenção é tudo o que você precisa, onde o Transformer foi introduzido
+Existem quatro etapas principais necessárias para implementar esse mecanismo: Criar vetores de consulta, chave e valor Cada incorporação de token é projetada em três vetores chamados consulta, chave e valor
+Calcular pontuações de atenção Determinar o quanto a consulta e os vetores-chave se relacionam entre si usando uma função de similaridade
+Como o nome sugere, a função de similaridade para atenção escalada de produto escalar é uma multiplicação da matriz de produto escalar dos embeddings
+Consultas e chaves semelhantes terão um grande produto escalar, enquanto aquelas que não têm muito em comum terão pouca sobreposição
+As saídas desta etapa são chamadas de pontuações de atenção e, para uma sequência com n tokens de entrada, existe uma matriz n × n correspondente de pontuações de atenção
+Calcular pesos de atenção Os produtos-ponto podem, em geral, produzir números arbitrariamente grandes que podem desestabilizar o processo de treinamento
+Para lidar com isso, as pontuações de atenção são primeiro multiplicadas por um fator de escala e, em seguida, normalizadas com um softmax para garantir que todos os valores da coluna sejam somados em um
+A matriz n × n resultante agora contém todos os pesos de atenção w
+jiAtualize os token embeddingsUma vez que os pesos de atenção são calculados, nós os multiplicamos pelo vetor de valor para obter uma representação atualizada para incorporaçãoPodemos visualizar como os pesos de atenção são calculados com uma biblioteca bacana chamada BertViz
+Esta biblioteca fornece várias funções que podem ser usadas para visualizar diferentes aspectos de atenção em modelos de Transformers
+Para visualizar os pesos de atenção, podemos usar o módulo neuron_view, que rastreia o cálculo dos pesos para mostrar como a consulta e os vetores-chave são combinados para produzir o peso final
+Já que BertViz precisa acessar as camadas de atenção do modelo, vamos instanciar nosso ponto de verificação BERT com sua classe de modelo e então usar a função show para gerar a visualização interativa: DESMISTIFICANDO CONSULTAS, CHAVES E VALORES A noção de vetores de consulta, chave e valor pode seja um pouco enigmático na primeira vez que os encontrar - por exemplo, por que eles são chamados assim? A origem desses nomes é inspirada em sistemas de recuperação de informações, mas podemos motivar seu significado com uma analogia simples: imagine que você está no supermercado comprando todos os ingredientes necessários para o seu jantar.
+A partir da receita do prato, cada um dos ingredientes necessários pode ser pensado como uma consulta e, ao vasculhar as prateleiras, você olha os rótulos (chaves) e verifica se corresponde a um ingrediente da sua lista (função de similaridade)
+Se você tiver uma correspondência, pegue o item (valor) da prateleira
+Neste exemplo, obtemos apenas um item de mercearia para cada rótulo que corresponda ao ingrediente
+A autoatenção é uma versão mais abstrata e “suave” disso: cada rótulo no supermercado corresponde ao ingrediente na medida em que cada chave corresponde à consulta
+Vamos dar uma olhada neste processo com mais detalhes, implementando o diagrama de operações para calcular a atenção do produto escalar, conforme mostrado na Figura 35
+Figura 3-5
+Operações em escala de atenção de produto escalar
+A primeira coisa que precisamos fazer é tokenizar o texto, então vamos usar nosso tokenizer para extrair os IDs de entrada: Como vimos no Capítulo 2, cada token na frase foi mapeado para um ID exclusivo no vocabulário do tokenizer
+Para simplificar, também excluímos os tokens [CLS] e [SEP]
+Em seguida, precisamos criar algumas incorporações densas
+No PyTorch, podemos fazer isso usando atorch
+nn
+Camada de incorporação que atua como uma tabela de pesquisa para cada inputID:Aqui usamos a classe AutoConfig para carregar a configuração
+json associado ao ponto de verificação sem caixa bert-base
+Em Transformers, cada ponto de verificação é atribuído a um arquivo de configuração que especifica vários hiperparâmetros como vocab_size e hidden_size, que em nosso exemplo nos mostra que cada ID de entrada será mapeado para um dos 30.522 vetores de incorporação armazenados em nn
+Incorporação, cada um com um tamanho de 768
+Agora que temos nossa tabela de pesquisa, podemos gerar os embeddings alimentando os IDs de entrada: Isso nos deu um tensor de tamanho (batch_size, seq_len,hidden_dim), exatamente como vimos no Capítulo 2
+Colocaremos as codificações posicionais para mais tarde, então a próxima etapa é criar os vetores de consulta, chave e valor e calcular as pontuações de atenção usando o produto escalar como a função de similaridade: Veremos mais tarde que a consulta, a chave e vetores de valor são gerados aplicando-se matrizes de peso independentes W aos embeddings, mas, por enquanto, os mantivemos iguais para simplificar
+Na atenção escalada do produto escalar, os produtos escalares são dimensionados pelo tamanho dos vetores de incorporação para que não obtenhamos muitos números grandes durante o treinamento que possam causar problemas com a propagação reversa: NOTA A tocha
+A função bmm executa um produto matriz-matriz em lote que simplifica o cálculo das pontuações de atenção onde a consulta e os vetores-chave têm tamanho (batch_size, seq_len, hidden_dim)
+Se ignorássemos a dimensão do lote, poderíamos calcular o produto escalar entre cada consulta e vetor-chave simplesmente transpondo o tensor-chave para ter forma (hidden_dim, seq_len) e, em seguida, usando o produto da matriz para coletar todos os produtos escalares em uma matriz (seq_len, seq_len)
+Como queremos fazer isso para todas as sequências do lote independentemente, usamostorch
+bmm que simplesmente precede a dimensão do lote às dimensões da matriz
+Isso criou uma matriz 5 × 5 de pontuações de atenção
+Em seguida, nós os normalizamos aplicando um softmax para que a soma sobre cada coluna seja igual a um
+O passo final é multiplicar os pesos de atenção pelos valores
+E é isso - passamos por todas as etapas para implementar uma forma simplificada de auto-atenção! Observe que todo o processo é apenas duas multiplicações de matrizes e um softmax, então, da próxima vez que você pensar em "auto-atenção", você pode se lembrar mentalmente de que tudo o que estamos fazendo é apenas uma forma sofisticada de calcular a média.
+Vamos agrupar essas etapas em uma função que podemos usar mais tarde
+Nosso mecanismo de atenção com consultas e vetores-chave iguais atribuirá uma pontuação muito grande a palavras idênticas no contexto e, em particular, à própria palavra atual: o produto escalar de uma consulta consigo mesma é sempre 1
+Mas, na prática, o significado de uma palavra será melhor informado por palavras complementares no contexto do que por palavras idênticas, e
+g
+o significado de “moscas” é melhor definido pela incorporação de informações de “tempo” e “seta” do que por outra menção de “moscas”
+Como podemos promover esse comportamento? Vamos permitir que o modelo crie um conjunto diferente de vetores para a consulta, chave e valor de um token usando três projeções lineares diferentes para projetar nosso vetor de token inicial em três espaços diferentes
+Atenção multifacetada Em nosso exemplo simples, usamos apenas os embeddings "como estão" para calcular as pontuações e pesos de atenção, mas isso está longe de toda a história
+Na prática, a camada de auto-atenção aplica três transformações lineares independentes para cada incorporação para gerar os vetores de consulta, chave e valor
+Essas transformações projetam os embeddings e cada projeção carrega seu próprio conjunto de parâmetros que podem ser aprendidos, o que permite que a camada de auto-atenção se concentre em diferentes aspectos semânticos da sequência
+Também acaba sendo benéfico ter vários conjuntos de projeções lineares, cada um representando a chamada cabeça de atenção.
+A camada de atenção multifacetada resultante é ilustrada na Figura 3-6
+Figura 3-6
+Atenção múltipla
+Vamos implementar essa camada primeiro codificando uma única cabeça de atenção
+Aqui inicializamos três camadas lineares independentes que aplicam a multiplicação de matrizes aos vetores de incorporação para produzir tensores de tamanho (batch_size, seq_len, head_dim) onde head_dim é a dimensão na qual estamos projetando
+Embora head_dim não precise ser menor que a dimensão de incorporação embed_dim dos tokens, na prática ele é escolhido para ser um múltiplo de embed_dim para que o cálculo em cada head seja constante
+Por exemplo, no BERT tem 12 cabeças de atenção, então a dimensão de cada cabeça é 768/12 = 64
+Agora que temos uma única cabeça de atenção, podemos concatenar as saídas de cada uma para implementar a camada de atenção multicabeçada completa
+Observe que a saída concatenada das cabeças de atenção também é alimentada através de uma camada linear final para produzir um tensor de saída de tamanho (batch_size, seq_len, hidden_dim) que é adequado para a rede de feed forward downstream
+Como verificação de sanidade, vamos ver se a atenção multifacetada produz a forma esperada de nossas entradas
+Funciona! Para encerrar esta seção sobre atenção, vamos usar BertViz novamente para visualizar a atenção para dois usos diferentes da palavra “moscas”
+Aqui podemos usar a função head_view do BertViz calculando as atenções, tokens e indicando onde está o limite da frase
+Esta visualização mostra os pesos de atenção como linhas conectando o token cuja incorporação está sendo atualizada (à esquerda), com cada palavra que está sendo atendida (à direita)
+A intensidade das linhas indica a força dos pesos de atenção, com valores próximos a 1 escuro, e linhas fracas próximas a zero
+Neste exemplo, a entrada consiste em duas sentenças e os tokens [CLS] e [SEP] são os tokens especiais no tokenizer do BERT que encontramos no Capítulo 2
+Uma coisa que podemos ver na visualização é que os pesos de atenção são mais fortes entre as palavras que pertencem à mesma frase, o que sugere que o BERT pode dizer que deve atender às palavras na mesma frase
+No entanto, para a palavra “moscas” podemos ver que BERT identificou “flecha” e importante na primeira frase e “fruta” e “banana” na segunda
+Esses pesos de atenção permitem que o modelo distinga o uso de "moscas" como um verbo ou substantivo, dependendo do contexto em que ocorre! redes de encaminhamento
+Camada Feed Forward A subcamada feed forward no codificador e decodificador é apenas uma rede neural totalmente conectada de 2 camadas simples, mas com uma torção; em vez de processar toda a sequência de incorporações como um único vetor, ele processa cada incorporação independentemente
+Por esta razão, esta camada é muitas vezes referida como uma camada de feed forward de posição
+Essas camadas de avanço de posição são às vezes também chamadas de convoluções unidimensionais com tamanho de kernel de um, normalmente por pessoas com experiência em visão computacional (e
+g
+a base de código OpenAI GPT usa essa nomenclatura)
+Uma regra prática da literatura é escolher o tamanho oculto da primeira camada para ser quatro vezes o tamanho dos embeddings e uma função de ativação GELU é mais comumente usada
+É aqui que a maior parte da capacidade e memorização é hipotetizada de acontecer e a parte que é mais frequentemente dimensionada ao escalar os modelos
+Agora temos todos os ingredientes para criar uma camada de codificador de transformador totalmente desenvolvida! A única decisão que resta a tomar é onde colocar as conexões de salto e a normalização da camada
+Vamos dar uma olhada e como isso afeta a arquitetura do modelo
+Juntando tudo Quando se trata de colocar a normalização de camada no codificador ou decodificadorcamadas de um transformador, existem duas opções principais adotadas na literatura:Normalização pós-camadaEste é o arranjo do papel do Transformer e coloca a normalização de camada entre as conexões de salto
+Este arranjo é difícil de treinar desde o início, pois os gradientes podem divergir
+Por esse motivo, você frequentemente verá um conceito conhecido como aquecimento da taxa de aprendizado, em que a taxa de aprendizado é gradualmente aumentada de um valor pequeno para um valor máximo durante o treinamento.
+Normalização de pré-camada O arranjo mais comum encontrado na literatura e coloca a normalização de camada entre as conexões de salto
+Tende a ser muito mais estável durante o treinamento e geralmente não requer aquecimento de taxa de aprendizado
+A diferença entre os dois arranjos é ilustrada na Figura 3-7
+Figura 3-7
+Diferentes arranjos de normalização de camadas em uma camada codificadora de transformador
+Vamos agora testar isso com nossas incorporações de entrada
+Funciona! Agora implementamos nossa primeira camada de codificador de transformador do zero! Em princípio, agora poderíamos passar os embeddings de entrada pela camada do codificador
+No entanto, há uma ressalva na forma como configuramos as camadas do codificador: elas são totalmente invariantes à posição dos tokens
+Uma vez que a camada de atenção de várias cabeças é efetivamente uma soma ponderada sofisticada, não há como codificar as informações posicionais na sequência
+5Felizmente, existe um truque fácil para incorporar informações posicionais com codificações posicionais
+Vamos dar uma olhada
+Embeddings posicionais Embeddings posicionais são baseados em uma ideia simples, mas muito eficaz: aumentar os embeddings de token com um padrão de valores dependentes da posição arranjados em um vetor
+Se o padrão é característico para cada posição, as cabeças de atenção e as camadas de alimentação em cada pilha podem aprender a incorporar informações posicionais em suas transformações
+Existem várias maneiras de conseguir isso e uma das abordagens mais populares, especialmente quando o conjunto de dados pré-treinamento é suficientemente grande, é usar um padrão que pode ser aprendido
+Isso funciona exatamente da mesma maneira que os tokenembeddings, mas usando o índice de posição em vez do ID do token como entrada
+Com essa abordagem, uma maneira eficiente de codificar a posição dos tokens é aprendida durante o pré-treinamento
+Vamos criar um módulo Embeddings personalizado que combina uma camada de incorporação de token que projeta os input_ids para um estado oculto denso junto com a incorporação posicional que faz o mesmo para position_ids
+A incorporação resultante é simplesmente a soma de ambas as incorporações
+Vemos que a camada de incorporação agora cria uma incorporação única e densa para cada token
+Embora as incorporações de posição que podem ser aprendidas sejam fáceis de implementar e amplamente utilizadas, existem várias alternativas: Representações posicionais absolutas O modelo Transformer usa padrões estáticos para codificar a posição dos tokens
+O padrão consiste em sinais modulados de seno e cosseno e funciona especialmente bem no regime de dados baixos
+Representações posicionais relativas Embora as posições absolutas sejam importantes, pode-se argumentar que para calcular um token incorporando principalmente a posição relativa ao tokené importante
+As representações posicionais relativas seguem essa intuição e codificam as posições relativas entre os tokens
+Modelos como DeBERTa usam tais representações
+Incorporações de posição rotativaAo combinar a ideia de representações posicionais absolutas e relativas, as incorporações de posição rotativa alcançam excelentes resultados em muitas tarefas
+Um exemplo recente de incorporação de posição rotativa em ação é o GPT-Neo
+Vamos juntar tudo agora construindo o codificador do transformador completo, combinando as incorporações com as camadas do codificador
+Podemos ver que obtemos um estado oculto para cada token no lote
+Esse formato de saída torna a arquitetura muito flexível e podemos adaptá-la facilmente para vários aplicativos, como prever tokens ausentes na modelagem de linguagem mascarada ou prever a posição inicial e final de uma resposta em perguntas e respostas
+Vamos ver como podemos construir um classificador com o codificador como o que usamos no Capítulo 2 na seção seguinte
+Corpos e CabeçasAgora que temos um modelo de codificador de transformador completo, gostaríamos de construir um classificador com ele
+O modelo geralmente é dividido em um corpo independente da tarefa e um cabeçalho específico da tarefa
+O que construímos até agora é o corpo e agora precisamos anexar uma cabeça de classificação a esse corpo
+Como temos um estado oculto para cada token, mas só precisamos fazer uma previsão, há várias opções de como abordar isso
+Tradicionalmente, o primeiro token em tais modelos é usado para a previsão e podemos anexar uma camada dropout e linear para fazer uma previsão de classificação
+A classe a seguir estende o codificador existente para classificação de sequência
+Antes de inicializar o modelo, precisamos definir quantas classes gostaríamos de prever
+Isso é exatamente o que temos procurado
+Para cada exemplo no lote, obtemos os logits não normalizados para cada classe na saída
+Isso corresponde ao modelo BERT que usamos no Capítulo 2 para detectar emoções em tweets
+Isso conclui nossa análise do codificador, então vamos agora voltar nossa atenção (trocadilhos!) para o decodificador
+Transformer Decoder Conforme ilustrado na Figura 3-8, a principal diferença entre o decodificador e o codificador é que o decodificador tem duas subcamadas de atenção: Atenção multi-head mascarada Garante que os tokens que geramos em cada etapa de tempo sejam baseados apenas nas saídas anteriores e no token atual que está sendo previsto
+Sem isso, o decodificador poderia trapacear durante o treinamento simplesmente copiando as traduções de destino, portanto, mascarar as entradas garante que a tarefa não seja trivial
+Atenção do codificador-decodificador Executa a atenção de várias cabeças sobre a chave de saída e os vetores de valor da pilha do codificador, com a representação intermediária do decodificador agindo como as consultas
+Desta forma, a camada de atenção do codificador-decodificador aprende como relacionar tokens de duas sequências diferentes, como duas linguagens diferentes
+Figura 3-8
+Zoom na camada do decodificador Transformer
+Vamos dar uma olhada nas modificações que precisamos para incluir o mascaramento na autoatenção e deixar a implementação da camada de atenção do codificador-decodificador como um problema de lição de casa
+O truque com a autoatenção mascarada é introduzir uma matriz de máscara com uns na diagonal inferior e zeros acima
+Aqui usamos a função tril do PyTorch para criar a matriz triangular inferior
+Assim que tivermos essa matriz de máscara, podemos impedir que cada cabeça de atenção espie os tokens futuros usando a tocha
+tensor
+masked_fill para substituir todos os zeros por negativeinfinity
+Definindo os valores superiores como infinito negativo, garantimos que os pesos de atenção sejam todos zero uma vez que tomamos o softmax sobre as pontuações porque e = 0
+Podemos incluir facilmente esse comportamento de mascaramento com uma pequena alteração em nossa função escalar de atenção de produto escalar que implementamos anteriormente neste capítulo
+A partir daqui é uma questão simples construir a camada do descodificador e indicamos ao leitor a excelente implementação do minGPT por Andrej Karpathy para mais detalhes
+Ok, isso foi um monte de detalhes técnicos, mas agora temos uma boa compreensão de como cada peça da arquitetura do Transformer funciona.
+Vamos encerrar o capítulo recuando um pouco e observando o cenário de diferentes modelos de transformadores e como eles se relacionam entre si.
+Conheça os Transformadores Como vimos neste capítulo existem três arquiteturas principais para modelos de transformadores: codificadores, decodificadores e codificadores-decodificadores
+O sucesso inicial dos primeiros modelos de transformadores desencadeou uma explosão cambriana no desenvolvimento de modelos, pois os pesquisadores construíram modelos em vários conjuntos de dados de diferentes tamanhos e naturezas, usaram novos objetivos de pré-treinamento e ajustaram a arquitetura para melhorar ainda mais o desempenho.
+Embora o zoológico de modelos ainda esteja crescendo rapidamente, a ampla variedade de modelos ainda pode ser dividida em três categorias de codificadores, decodificadores e codificadores-decodificadores
+Nesta seção, forneceremos uma breve visão geral dos modelos de transformadores mais importantes
+Vamos começar dando uma olhada na árvore genealógica do transformador
+A Árvore da Vida Transformer Ao longo do tempo, cada uma das três arquiteturas principais passou por uma evolução própria, que é ilustrada na Figura 3-9, onde alguns dos modelos mais proeminentes e seus descendentes são mostrados
+Figura 3-9
+Uma visão geral de algumas das arquiteturas de transformadores mais proeminentes
+Com mais de 50 arquiteturas diferentes incluídas no Transformers, esta árvore genealógica não fornece uma visão geral completa de todas as arquiteturas existentes, mas apenas destaca alguns dos marcos arquitetônicos
+Cobrimos o Transformer em profundidade neste capítulo, então vamos dar uma olhada em cada um dos principais descendentes, começando com o branch encoder
+O Encoder Branch O primeiro modelo somente de encoder baseado na arquitetura do transformador foi o BERT
+Na época em que foi publicado, quebrou todos os resultados de ponta no popular benchmark GLUE
+6 Posteriormente, o objetivo do pré-treinamento, bem como a arquitetura do BERT, foram adaptados para melhorar ainda mais o desempenho
+Modelos apenas de codificador ainda dominam a pesquisa e a indústria em tarefas de compreensão de linguagem natural (NLU), como classificação de texto, reconhecimento de entidade nomeada e resposta a perguntas
+Vamos dar uma breve olhada no modelo BERT e suas variantes: O BERT(BERT) é pré-treinado com os dois objetivos de prever tokens mascarados em textos e determinar se duas passagens de texto se seguem
+A primeira tarefa é chamada de modelagem de linguagem mascarada (MLM) e a última previsão da próxima frase (NSP)
+O BERT usou o BookCorpus e a Wikipédia em inglês para pré-treinamento e o modelo pode então ser ajustado em qualquer tarefa NLU com muito poucos dados
+DistilBERTAbora o BERT forneça ótimos resultados, pode ser caro e difícil de implantar na produção devido ao seu tamanho
+Ao usar a destilação de conhecimento durante o pré-treinamento, o DistilBERT atinge 97% do desempenho do BERT, usando 40% menos memória e sendo 60% mais rápido
+Você pode encontrar mais detalhes sobre a destilação do conhecimento no Capítulo 5
+RoBERTaUm estudo após o lançamento do BERT revelou que o desempenho do BERT pode ser melhorado modificando o esquema de pré-treinamento
+RoBERTa é treinado por mais tempo, em lotes maiores com mais dados de treinamento e abandonou a tarefa NSP para melhorar significativamente o desempenho em relação ao modelo BERT original
+XLMIno trabalho de XLM, vários objetivos de pré-treinamento para a construção de modelos multilíngues foram explorados, incluindo a modelagem autorregressiva de linguagem de modelos semelhantes a GPT e MLM de BERT
+Além disso, os autores introduziram a modelagem de linguagem de tradução (TLM), que é uma extensão do MLM para entradas de vários idiomas
+Experimentando essas tarefas de pré-treinamento, eles alcançaram o estado da arte em vários benchmarks NLU multilíngues, bem como em tarefas de tradução
+XLM-RoBERTaSeguindo o trabalho de XLM e RoBERTa, o modelo XLM-RoBERTA ou XLM-R leva o pré-treinamento multilíngue um passo adiante, ampliando massivamente os dados de treinamento
+Usando o Common Crawlcorpus, eles criaram um conjunto de dados com 2
+5 terabytes de texto e treinar um codificador com MLM neste conjunto de dados
+Como o conjunto de dados contém apenas dados monolíngues sem nenhum texto paralelo, o objetivo TLM do XLMis foi descartado
+Essa abordagem supera as variantes XLM e BERT multilíngues por uma grande margem, especialmente em idiomas com poucos recursos
+ALBERTO modelo ALBERT introduziu três alterações para tornar a arquitetura do codificador mais eficiente
+Primeiro, ele desacoplou a dimensão de incorporação de token da dimensão oculta, permitindo assim que a dimensão de incorporação fosse pequena e economizando parâmetros especialmente quando o vocabulário fica grande
+Em segundo lugar, todas as camadas compartilham os parâmetros, o que diminui ainda mais o número de parâmetros efetivos
+Por fim, eles substituem o objetivo do NSP por uma previsão de ordenação de sentenças que precisa prever se a ordem de duas sentenças foi trocada ou não, em vez de prever se elas pertencem uma à outra.
+Essas mudanças permitem o treinamento de modelos ainda maiores que possuem menos parâmetros que mostram desempenho superior em tarefas NLU
+ELECTRAUma limitação do objetivo de pré-treinamento MLM padrão é que, em cada etapa de treinamento, apenas as representações dos tokens mascarados são atualizadas, enquanto os outros tokens de entrada não são
+Para resolver esse problema, a ELECTRA usa uma abordagem de dois modelos: o primeiro modelo (que normalmente é pequeno) funciona como um MLM padrão e prevê tokens mascarados
+O segundo modelo chamado discriminador é então encarregado de prever quais dos tokens na primeira sequência de saída do modelo foram originalmente mascarados
+Portanto, o discriminador precisa fazer uma classificação binária para cada token, o que torna o treinamento 30 vezes mais eficiente
+Para tarefas downstream, o discriminador é ajustado como um modelo BERT padrão
+DeBERTaO modelo DeBERTa apresenta duas mudanças arquitetônicas
+Por um lado, os autores reconheceram a importância da posição nos transformadores e a separaram do vetor de conteúdo
+Com dois mecanismos de atenção separados e independentes, tanto a incorporação de conteúdo quanto a de posição relativa são processadas em cada camada
+Por outro lado, a posição absoluta de uma palavra também é importante, principalmente para decodificá-la.
+Por esse motivo, uma incorporação de posição absoluta é adicionada logo antes da camada SoftMax do cabeçote de decodificação do token
+DeBERTa é o primeiro modelo (como um conjunto) a superar a linha de base humana no SuperGLUEbenchmark7
+O ramo do decodificador O progresso nos modelos de decodificadores de transformadores foi liderado em grande parte pela OpenAI
+Esses modelos são excepcionalmente bons em prever a próxima palavra em uma sequência e, portanto, são usados ​​principalmente para tarefas de geração de texto (consulte o Capítulo 8 para obter mais detalhes).
+Seu progresso foi impulsionado pelo uso de conjuntos de dados maiores e escalando os modelos de linguagem para tamanhos cada vez maiores
+Vamos dar uma olhada na evolução desses fascinantes modelos de geração: GPPTA introdução do GPT combinou duas ideias-chave no NLP: a nova e eficiente arquitetura do decodificador transformador e o aprendizado de transferência
+Nessa configuração, o modelo é pré-treinado prevendo a próxima palavra com base no contexto
+O modelo foi treinado no BookCorpus e obteve ótimos resultados em tarefas posteriores, como classificação
+GPT-2Inspirado pelo sucesso da abordagem de pré-treinamento simples e escalonável, o modelo original e o conjunto de treinamento foram ampliados para produzir GPT-2
+Este modelo é capaz de produzir sequências longas com texto coerente
+Devido a preocupações de uso indevido, o modelo foi lançado de forma encenada, com modelos menores sendo publicados primeiro e o modelo completo depois.
+Modelos CTRL como GPT-2 podem continuar com uma sequência de entrada ou prompt
+No entanto, o usuário tem pouco controle sobre o estilo da sequência gerada
+O modelo CTRL resolve esse problema adicionando “tokens de controle” no início da sequência
+Dessa forma, o estilo da geração pode ser controlado e permitir diversas gerações
+GPT-3 Após o sucesso do dimensionamento do GPT até o GPT-2, uma pesquisa completa sobre as leis de dimensionamento dos modelos de linguagem8 revelou que existem leis de potência simples que governam a relação entre computação, tamanho do conjunto de dados, tamanho do modelo e o desempenho de um modelo de linguagem
+Inspirado por esses insights, o GPT-2 foi ampliado por um fator de 100 para produzir o GPT-3 com 175 bilhões de parâmetros
+Além de ser capaz de gerar passagens de texto impressionantemente realistas, o modelo também exibe recursos de aprendizado de poucos tiros: com alguns exemplos de uma nova tarefa, como exemplos de texto para código, o modelo é capaz de realizar a tarefa em novos exemplos
+A OpenAI não tem código aberto para este modelo, mas fornece uma interface por meio da API da OpenAI
+GPT-Neo/GPT-J-6BGPT-Neo e GPT-J-6B são modelos do tipo GPT que são treinados por EleutherAI, que é um coletivo de pesquisadores que visam recriar e lançar modelos em escala GPT-3
+Os modelos atuais são variantes menores do modelo completo de 175 bilhões de parâmetros, com 2
+Parâmetros de 7 e 6 bilhões que são competitivos com os modelos GPT-3 menores que o OpenAI oferece
+Embora tenha se tornado comum construir modelos usando uma única pilha de codificador ou decodificador, existem várias variantes de codificador-decodificador do Transformer que têm novas aplicações nos domínios NLU e NLG: T5 O modelo T5 unifica todas as tarefas NLU e NLG convertendo todas tarefas em texto para texto
+Como tal, todas as tarefas são enquadradas como tarefas de sequência a sequência, onde a adoção de uma arquitetura de codificador-decodificador é natural
+A arquitetura T5 usa a arquitetura Transformer original
+Usando o grande conjunto de dados C4 rastreado, o modelo é pré-treinado com modelagem de linguagem mascarada, bem como as tarefas SuperGLUE, traduzindo todas elas para tarefas de texto para texto
+O maior modelo com 11 bilhões de parâmetros produziu resultados de ponta em vários benchmarks, embora seja comparativamente grande
+BARTBART combina os procedimentos de pré-treinamento de BERT e GPT dentro da arquitetura do codificador-decodificador
+As sequências de entrada passam por uma das várias transformações possíveis, desde mascaramento simples, permutação de sentença, exclusão de token até rotação de documento
+Essas entradas são passadas pelo codificador e o decodificador tem que reconstruir os textos originais
+Isso torna o modelo mais flexível, pois é possível usá-lo para tarefas NLU e NLG e atinge desempenho de ponta em ambos
+M2M-100Convencionalmente, um modelo de tradução é construído para um par de idiomas e direção de tradução
+Naturalmente, isso não se aplica a muitos idiomas e, além disso, pode haver conhecimento compartilhado entre pares de idiomas que podem ser aproveitados para tradução entre idiomas raros
+M2M-100 é o primeiro modelo de tradução que pode traduzir entre qualquer um dos 100 idiomas
+Isso permite traduções de alta qualidade entre idiomas raros e sub-representados
+BigBirdUma limitação principal das arquiteturas do transformador é o tamanho máximo do contexto devido aos requisitos de memória quadrática do mecanismo de atenção
+BigBird resolve esse problema usando uma forma esparsa de atenção que escala linearmente
+Isso permite a escala drástica de contextos, que é de 512 tokens na maioria dos modelos BERT para 4.096 no BigBird
+Issoéespecialmenteútil nos casos em que longas dependências precisam ser conservadas, como na sumarização de texto
+ConclusãoComeçamos no centro da arquitetura do Transformer com um mergulho profundo na autoatenção e subsequentemente adicionamos todas as partes necessárias para construir um modelo de codificador do transformador
+Adicionamos camadas de incorporação para tokens e informações posicionais, construídas em uma camada de feedforward para complementar as cabeças de atenção e, finalmente, adicionamos uma cabeça de classificação ao corpo do modelo para fazer previsões
+Também demos uma olhada no lado do decodificador da arquitetura do Transformer e concluímos o capítulo com uma visão geral das arquiteturas de modelo mais importantes
+Com o código que implementamos neste capítulo, você está bem posicionado para entender o código-fonte do Transformers e até mesmo contribuir com seu primeiro modelo para a biblioteca! Existe um guia na documentação do Transformer que fornece as informações necessárias para começar
+Agora que temos uma melhor compreensão dos princípios subjacentes, vamos além da classificação simples e construímos um modelo de resposta a perguntas no próximo capítulo

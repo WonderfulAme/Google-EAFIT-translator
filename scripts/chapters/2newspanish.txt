@@ -1,0 +1,284 @@
+Capitulo 2
+Clasificación de texto Ahora imagina que eres un científico de datos que necesita construir un sistema que pueda identificar automáticamente estados emocionales como "ira" o "alegría" que las personas expresan hacia el producto de tu empresa en Twitter.
+Hasta 2018, el enfoque de aprendizaje profundo para este problema generalmente consistía en encontrar una arquitectura neuronal adecuada para la tarea y entrenarla desde cero en un conjunto de datos de tweets etiquetados.
+Este enfoque presentaba tres inconvenientes principales: necesitaba una gran cantidad de datos etiquetados para entrenar modelos precisos como redes neuronales recurrentes o convolucionales.
+Entrenar estos modelos desde cero requería mucho tiempo y era costoso.
+El modelo entrenado no podría adaptarse fácilmente a una nueva tarea, e
+gramo
+con un conjunto diferente de etiquetas
+Hoy en día, estas limitaciones se superan en gran medida a través del aprendizaje por transferencia, donde normalmente una arquitectura basada en Transformer se entrena previamente en una tarea genérica, como el modelado de lenguaje, y luego se reutiliza para una amplia variedad de tareas posteriores.
+Aunque el entrenamiento previo de un Transformer puede involucrar datos y recursos informáticos significativos, muchos de estos modelos de lenguaje están disponibles gratuitamente en grandes laboratorios de investigación y se pueden descargar fácilmente desde Hugging FaceModel Hub. Este capítulo lo guiará a través de varios enfoques para la detección de emociones utilizando un famoso modelo de Transformer llamado BERT, abreviatura de Representaciones de codificador bidireccional de Transformers
+1 Este será nuestro primer encuentro con las tres bibliotecas principales del ecosistema HuggingFace: conjuntos de datos, tokenizadores y transformadores.
+Como se muestra en la Figura 2-2, estas bibliotecas nos permitirán pasar rápidamente del texto sin formato a un modelo ajustado que se puede usar para inferir en nuevos tweets.
+Entonces, siguiendo el espíritu de Optimus Prime, ¡vamos a sumergirnos, “transformar e implementar!” El conjunto de datos Para construir nuestro detector de emociones, usaremos un gran conjunto de datos de un artículo2 que exploró cómo se representan las emociones en los mensajes de Twitter en inglés.
+A diferencia de la mayoría de los conjuntos de datos de análisis de sentimientos que involucran solo polaridades "positivas" y "negativas", este conjunto de datos contiene seis emociones básicas: ira, disgusto, miedo, alegría, tristeza y sorpresa.
+¡Dado un tweet, nuestra tarea será entrenar un modelo que pueda clasificarlo en una de estas emociones! Un primer vistazo a los conjuntos de datos de Hugging Face Usaremos la biblioteca Hugging Face Datasets para descargar los datos del Hugging Face Dataset Hub
+Esta biblioteca está diseñada para cargar y procesar grandes conjuntos de datos de manera eficiente, compartirlos con la comunidad y simplificar la interoperabilidad entre NumPy, Pandas, PyTorch y TensorFlow.
+También contiene muchos conjuntos de datos y métricas de referencia de PNL, como el conjunto de datos de respuesta a preguntas de Stanford (SQuAD), la evaluación general de comprensión del lenguaje (GLUE) y Wikipedia.
+Podemos usar la función list_datasets para ver qué conjuntos de datos están disponibles en el Hub
+Esto se parece al conjunto de datos que buscamos, así que a continuación podemos cargarlo con la función load_dataset de Conjuntos de datos
+En cada caso, la estructura de datos resultante depende del tipo de consulta; aunque esto puede parecer extraño al principio, ¡es parte del ingrediente secreto que hace que los conjuntos de datos sean tan flexibles! Entonces, ahora que hemos visto cómo cargar e inspeccionar datos con conjuntos de datos, hagamos algunas comprobaciones de cordura sobre el contenido de nuestros tweets.
+De conjuntos de datos a marcos de datos Aunque los conjuntos de datos brindan una gran cantidad de funciones de bajo nivel para dividir nuestros datos, a menudo es conveniente convertir un objeto de conjunto de datos en un marco de datos de Pandas para que podamos acceder a API de alto nivel para la visualización de datos.
+Para habilitar la conversión, Datasets proporciona un conjunto de datos
+función set_format que nos permite cambiar el formato de salida del conjunto de datos
+Esto no cambia el formato de datos subyacente que es Apache Arrow y puede cambiar a otro formato más tarde si es necesario
+Como podemos ver, los encabezados de las columnas se han conservado y las primeras filas coinciden con nuestras vistas anteriores de los datos.
+Antes de sumergirse en la construcción de un clasificador, echemos un vistazo más de cerca al conjunto de datos
+Como dijo AndrejKarpathy, convertirse en “uno con los datos”3 es esencial para construir grandes modelos.
+Mire la distribución de clases Siempre que esté trabajando en problemas de clasificación de texto, es una buena idea examinar la distribución de ejemplos entre cada clase.
+Por ejemplo, un conjunto de datos con una distribución de clases sesgada podría requerir un tratamiento diferente en términos de pérdida de entrenamiento y métricas de evaluación que uno balanceado.
+Podemos ver que el conjunto de datos está muy desequilibrado; las clases de alegría y tristeza aparecen con frecuencia mientras que el amor y la tristeza son entre 5 y 10 veces más raros
+Hay varias formas de tratar con datos desequilibrados, como volver a muestrear las clases minoritarias o mayoritarias.
+Alternativamente, también podemos ponderar la función de pérdida para dar cuenta de las clases subrepresentadas
+Sin embargo, para simplificar las cosas en esta primera aplicación práctica dejamos estas técnicas como ejercicio para el lector y pasamos a examinar la longitud de nuestros tweets.
+¿Cuánto duran nuestros tweets? Los modelos de transformadores tienen una longitud máxima de secuencia de entrada que se denomina tamaño máximo de contexto
+Para la mayoría de las aplicaciones con BERT, el tamaño de contexto máximo es de 512 tokens, donde un token se define por la elección del tokenizador y puede ser una palabra, una subpalabra o un carácter.
+Hagamos una estimación aproximada de la duración de nuestros tweets por emoción observando la distribución de palabras por tweet
+A partir de la gráfica, vemos que para cada emoción, la mayoría de los tweets tienen alrededor de 15 palabras y los tweets más largos están muy por debajo del tamaño de contexto máximo de BERT de 512 tokens.
+Los textos que son más largos que la ventana de contexto de un modelo deben truncarse, lo que puede provocar una pérdida de rendimiento si el texto truncado contiene información crucial.
+¡Veamos ahora cómo podemos convertir estos textos en bruto en un formato adecuado para los transformadores! De texto a fichas Los modelos de transformadores como BERT no pueden recibir cadenas en bruto como entrada; en cambio, asumen que el texto ha sido tokenizado en vectores numéricos
+La tokenización es el paso de descomponer una cadena en las unidades atómicas utilizadas en el modelo.
+Hay varias estrategias de tokenización que uno puede adoptar y la división óptima de palabras en subunidades generalmente se aprende del corpus
+Antes de analizar el tokenizador utilizado para BERT, motivémoslo observando dos casos extremos: tokenizadores de caracteres y palabras.
+Tokenización de personajes El esquema de tokenización más simple es alimentar cada personaje individualmente al modelo
+En Python, los objetos str son realmente arreglos bajo el capó que nos permiten implementar rápidamente la tokenización a nivel de carácter con solo una línea de código.
+Este es un buen comienzo, pero aún no hemos terminado porque nuestro modelo espera que cada carácter se convierta en un número entero, un proceso llamado numerización.
+¡Casi terminamos! Cada token se ha asignado a un identificador numérico único, de ahí el nombre input_ids
+El último paso es convertir input_ids en un tensor 2d de vectores one-hot que son más adecuados para redes neuronales que la representación categórica de input_ids
+La razón de esto es que los elementos de input_ids crean una escala ordinal, por lo que sumar o restar dos ID es una operación sin sentido ya que el resultado es una nueva ID que representa otro token aleatorio.
+Por otro lado, el resultado de sumar dos codificaciones one-hot se puede interpretar fácilmente: las dos entradas que están "calientes" indican que los dos tokens correspondientes ocurren simultáneamente.
+A partir de nuestro ejemplo simple, podemos ver que la tokenización a nivel de caracteres ignora cualquier estructura en los textos, como palabras, y los trata como flujos de caracteres.
+Aunque esto ayuda a lidiar con errores ortográficos y palabras raras, el principal inconveniente es que las estructuras lingüísticas, como las palabras, deben aprenderse, y ese proceso requiere una gran cantidad de cómputo y memoria.
+Por esta razón, la tokenización de caracteres rara vez se usa en la práctica.
+En su lugar, alguna estructura del texto, como las palabras, se conserva durante el paso de tokenización.
+La tokenización de palabras es un enfoque sencillo para lograr esto: ¡veamos cómo funciona!
+Al usar palabras desde el principio, el modelo puede saltarse el paso de aprender palabras de los personajes y, por lo tanto, eliminar la complejidad del proceso de entrenamiento.
+Desde aquí podemos seguir los mismos pasos que tomamos para el tokenizador de caracteres y asignar cada palabra a un identificador único
+Sin embargo, ya podemos ver un problema potencial con este esquema de tokenización; la puntuación no se tiene en cuenta, por lo que la PNL
+se trata como un único token
+Dado que las palabras pueden incluir declinaciones, conjugaciones o faltas de ortografía, ¡el tamaño del vocabulario puede crecer fácilmente a millones! NOTA Hay variaciones de tokenizadores de palabras que tienen reglas adicionales para la puntuación.
+También se puede aplicar la derivación que normaliza las palabras a su raíz (e
+gramo
+“genial”, “más grande” y “más grande” se convierten en “genial”) a expensas de perder alguna información en el texto
+La razón por la que tener un gran vocabulario es un problema es que requiere redes neuronales con una enorme cantidad de parámetros.
+Para ilustrar esto, supongamos que tenemos 1 millón de palabras únicas y queremos comprimir los vectores de entrada de 1 millón de dimensiones a 1 mil vectores dimensionales en la primera capa de una red neuronal.
+Este es un paso estándar en la mayoría de las arquitecturas NLP y la matriz de peso resultante de este vector contendría 1 millón × 1 mil pesos = 1 billón de pesos
+Esto ya es comparable al modelo GPT-2 más grande que tiene 1
+¡4 mil millones de parámetros en total! Naturalmente, queremos evitar desperdiciar tanto los parámetros de nuestro modelo, ya que son costosos de entrenar y los modelos más grandes son más difíciles de mantener.
+Un enfoque común es limitar el vocabulario y descartar palabras raras considerando, digamos, las 100.000 palabras más comunes en el corpus.
+Las palabras que no forman parte del vocabulario se clasifican como "desconocidas" y se asignan a un token UNK compartido
+Esto significa que perdemos información potencialmente importante en el proceso de tokenización de palabras, ya que el modelo no tiene información sobre qué palabras se asociaron con los tokens UNK.
+¿No sería bueno si hubiera un compromiso entre la tokenización de caracteres y palabras que conserve toda la información de entrada y parte de la estructura de entrada? ¡Hay! Veamos las ideas principales detrás de la tokenización de subpalabras
+Tokenización de subpalabras La idea detrás de la tokenización de subpalabras es tomar lo mejor de ambos mundos de la tokenización de caracteres y palabras.
+Por un lado, queremos usar caracteres, ya que permiten que el modelo se ocupe de combinaciones de caracteres raras y faltas de ortografía.
+Por otro lado, queremos mantener las palabras frecuentes y las partes de palabras como entidades únicas.
+ADVERTENCIA ¡Cambiar la tokenización de un modelo después del entrenamiento previo sería catastrófico ya que las representaciones de palabras y subpalabras aprendidas se volverían obsoletas! La biblioteca de Transformers proporciona funciones para asegurarse de que el tokenizador correcto esté cargado para el Transformador correspondiente
+Hay varios algoritmos de tokenización de subpalabras, como Byte-Pair-Encoding, WordPiece, Unigram y SentencePiece.
+La mayoría de ellos adopta una estrategia similar: Tokenización simple. El corpus de texto se divide en palabras, generalmente de acuerdo con las reglas de espacios en blanco y puntuación.
+Conteo Se cuentan todas las palabras del corpus y se almacena la cuenta
+DivisiónLas palabras en la cuenta se dividen en subpalabras
+Inicialmente estos son personajes
+Conteo de pares de subpalabrasUsando el conteo, se cuentan los pares de subpalabras
+MergingBasado en una regla, algunos de los pares de subpalabras se fusionan en el corpus
+StoppingEl proceso se detiene cuando se alcanza un tamaño de vocabulario predefinido
+Hay varias variaciones de este procedimiento en los algoritmos anteriores y el TokenizerSummary en la documentación de Transformers proporciona información detallada sobre cada estrategia de tokenización.
+La principal característica distintiva de la tokenización de subpalabras (así como la tokenización de palabras) es que se aprende del corpus utilizado para el entrenamiento previo.
+¡Echemos un vistazo a cómo funciona realmente la tokenización de subpalabras usando la biblioteca Hugging Face Transformers! Uso de tokenizadores preentrenados Hemos notado que cargar el tokenizador preentrenado correcto para un modelo preentrenado dado es crucial para obtener resultados sensatos
+La biblioteca de Transformers proporciona una función conveniente de_preentrenada que se puede usar para cargar ambos objetos, ya sea desde HuggingFace Model Hub o desde una ruta local.
+Para construir nuestro detector de emociones, usaremos una variante de BERT llamada DistilBERT,4 que es una versión reducida del modelo BERT original.
+La principal ventaja de este modelo es que logra un rendimiento comparable al de BERT y, al mismo tiempo, es significativamente más pequeño y más eficiente.
+Esto nos permite entrenar un modelo en unos pocos minutos y si desea entrenar un modelo BERT más grande, simplemente puede cambiar el nombre del modelo del modelo preentrenado.
+La interfaz del modelo y el tokenizador será la misma, lo que destaca la flexibilidad de la biblioteca de Transformers; ¡Podemos experimentar con una amplia variedad de modelos de Transformer simplemente cambiando el nombre del modelo preentrenado en el código! CONSEJO Es una buena idea comenzar con un modelo más pequeño para que pueda construir rápidamente un prototipo que funcione.
+Una vez que esté seguro de que la canalización funciona de principio a fin, puede experimentar con modelos más grandes para mejorar el rendimiento.
+donde la clase AutoTokenizer asegura que emparejamos el tokenizador y el vocabulario correctos con la arquitectura del modelo
+Podemos examinar algunos atributos del tokenizador, como el tamaño del vocabulario: podemos observar dos cosas
+En primer lugar, los tokens [CLS] y [SEP] se agregaron automáticamente al inicio y al final de la secuencia y, en segundo lugar, la palabra larga prueba complicada se dividió en dos tokens.
+El prefijo ## en ##prueba significa que la cadena anterior no es un espacio en blanco y que debe fusionarse con el token anterior
+Ahora que tenemos una comprensión básica del proceso de tokenización, podemos usar el tokenizador para enviar tweets al modelo.
+Entrenamiento de un clasificador de texto Como se discutió en el Capítulo 2, los modelos BERT están previamente entrenados para predecir palabras enmascaradas en una secuencia de texto.
+Sin embargo, no podemos usar estos modelos de lenguaje directamente para la clasificación de texto, por lo que debemos modificarlos ligeramente.
+Para entender qué modificaciones son necesarias, revisemos la arquitectura BERT representada en la Figura 2-3
+Primero, el texto se tokeniza y se representa como vectores one-hot cuya dimensión es el tamaño del vocabulario del tokenizador, que generalmente consta de 50k-100k tokens únicos.
+A continuación, estas codificaciones de token se incrustan en dimensiones más bajas y se pasan a través de las capas del bloque del codificador para generar un estado oculto para cada token de entrada.
+Para el objetivo de preentrenamiento del modelado del lenguaje, cada estado oculto está conectado a una capa que predice el token para el token de entrada, que solo no es trivial si el token de entrada estaba enmascarado.
+Para la tarea de clasificación, reemplazamos la capa de modelado de lenguaje con una capa de clasificación
+Las secuencias BERT siempre comienzan con un token de clasificación [CLS], por lo tanto, usamos el estado oculto para el token de clasificación como entrada para nuestra capa de clasificación.
+NOTA En la práctica, PyTorch omite el paso de crear un vector one-hot porque multiplicar una matriz con un vector one-hot es lo mismo que extraer una columna de la matriz incrustada
+Esto se puede hacer directamente obteniendo la columna con el ID del token de la matriz
+Tenemos dos opciones para entrenar dicho modelo en nuestro conjunto de datos de Twitter: Extracción de funciones Usamos los estados ocultos como funciones y solo entrenamos un clasificador en ellos
+Ajuste finoEntrenamos todo el modelo de principio a fin, lo que también actualiza los parámetros del modelo BERT preentrenado
+En esta sección exploramos ambas opciones para DistilBert y examinamos sus compensaciones
+Transformadores como extractores de funciones Usar un transformador como extractor de funciones es bastante simple; como se muestra en la Figura 2-4, congelamos los pesos del cuerpo durante el entrenamiento y usamos los estados ocultos como características para el clasificador
+La ventaja de este enfoque es que podemos entrenar rápidamente un modelo pequeño o poco profundo
+Dicho modelo podría ser una capa de clasificación neuronal o un método que no dependa de gradientes como un bosque aleatorio
+Este método es especialmente conveniente si las GPU no están disponibles, ya que los estados ocultos se pueden calcular relativamente rápido en una CPU.
+Figura 2-4
+En el enfoque basado en funciones, el modelo BERT está congelado y solo proporciona funciones para un clasificador
+El método basado en características se basa en la suposición de que los estados ocultos capturan toda la información necesaria para la tarea de clasificación.
+Sin embargo, si alguna información no es necesaria para la tarea de preentrenamiento, es posible que no esté codificada en el estado oculto, incluso si fuera crucial para la tarea de clasificación.
+En este caso, el modelo de clasificación tiene que trabajar con datos subóptimos, y es mejor usar el enfoque de ajuste fino que se analiza en la siguiente sección.
+Aquí hemos usado PyTorch para verificar si hay una GPU disponible y luego encadenamos PyTorchnn
+Módulo
+método to("cuda") al cargador de modelos; sin esto, ejecutaríamos el modelo en la CPU, que puede ser considerablemente más lento
+La clase AutoModel corresponde al codificador de entrada que traduce los vectores one-hot a incrustaciones con codificaciones posicionales y los alimenta a través de la pila del codificador para devolver los estados ocultos.
+La cabeza del modelo de lenguaje que toma los estados ocultos y los decodifica para la predicción del token enmascarado se excluye ya que solo se necesita para el entrenamiento previo.
+Si desea usar ese cabezal de modelo, puede cargar el modelo completo con AutoModelForMaskedLM
+Ahora podemos pasar este tensor al modelo para extraer los estados ocultos
+Según la configuración del modelo, la salida puede contener varios objetos, como los estados ocultos, las pérdidas o las atenciones, que se organizan en una clase similar a una tupla con nombre en Python.
+En nuestro ejemplo, la salida del modelo es una clase de datos de Python llamada BaseModelOutput y, como cualquier clase, podemos acceder a los atributos por su nombre.
+Dado que el modelo actual devuelve solo una entrada, que es el último estado oculto, pasemos el texto codificado y examinemos las salidas: Al observar el tensor de estado oculto, vemos que tiene la forma [tamaño_lote, n_tokens, dim_oculto]
+La forma en que funciona BERT es que se devuelve un estado oculto para cada entrada, y el modelo usa estos estados ocultos para predecir tokens enmascarados en la tarea de preentrenamiento.
+Para tareas de clasificación, es una práctica común usar el estado oculto asociado con el token [CLS] como característica de entrada, que se encuentra en la primera posición en la segunda dimensión.
+Tokenización de todo el conjunto de datos Ahora que sabemos cómo extraer los estados ocultos de una sola cadena, ¡tokenicemos todo el conjunto de datos! Para hacer esto, podemos escribir una función simple que tokenizará nuestros ejemplos
+vemos que el resultado es un diccionario, donde cada valor es una lista de listas generada por el tokenizador
+En particular, cada secuencia en input_ids comienza con 101 y termina con 102, seguido de ceros, correspondientes a los tokens [CLS], [SEP] y [PAD] respectivamente: También tenga en cuenta que además de devolver los tweets codificados como input_ids, el tokenizador también devuelve una lista de matrices de máscaras de atención
+Esto se debe a que no queremos que el modelo se confunda con los tokens de relleno adicionales, por lo que la máscara de atención permite que el modelo ignore las partes rellenas de la entrada.
+Consulte la Figura 2-5 para obtener una explicación visual sobre cómo se formatean las ID de entrada y las máscaras de atención.
+ADVERTENCIADado que los tensores de entrada solo se apilan cuando se pasan al modelo, es importante que el tamaño del lote de la tokenización y el entrenamiento coincidan y que no haya barajado
+De lo contrario, es posible que los tensores de entrada no se apilen porque tienen diferentes longitudes.
+Esto sucede porque se rellenan hasta la longitud máxima del lote de tokenización, que puede ser diferente para cada lote.
+En caso de duda, configure batch_size=None en el paso de tokenización, ya que esto aplicará la tokenización globalmente y todos los tensores de entrada tendrán la misma longitud.
+Sin embargo, esto usará más memoria
+Presentaremos una alternativa a este enfoque con una función de clasificación que solo une los tensores cuando son necesarios y los rellena en consecuencia.
+Para aplicar nuestra función tokenizar a todo el corpus de emociones, usaremos el DatasetDict
+función de mapa
+Esto aplicará la tokenización en todas las divisiones del corpus, por lo que nuestros datos de entrenamiento, validación y prueba se procesarán previamente en una sola línea de código:emotions_encoded =emotions
+map(tokenize, batched=True, batch_size=None) De forma predeterminada, DatasetDict
+map opera individualmente en cada ejemplo en el corpus, por lo que establecer batched=True codificará los tweets en lotes, mientras que batch_size=None aplica nuestra función de tokenización en un solo lote y asegura que los tensores de entrada y las máscaras de atención tengan la misma forma globalmente
+Podemos ver que esta operación ha agregado dos nuevas características al conjunto de datos: input_ids y la máscara de atención.
+De ID de entrada a estados ocultos Ahora que hemos convertido nuestros tweets en entradas numéricas, el siguiente paso es extraer los últimos estados ocultos para que podamos enviarlos a un clasificador.
+Si tuviéramos un solo ejemplo, simplemente podríamos pasar los input_ids y la máscara de atención al modelo de la siguiente manera, pero lo que realmente queremos son los estados ocultos en todo el conjunto de datos.
+Para esto, podemos usar el DatasetDict
+función de mapa de nuevo! Definamos una función forward_pass que tome un lote de ID de entrada y máscaras de atención, los alimente al modelo y agregue una nueva función de estado oculto a nuestro lote.
+Creación de una matriz de características El conjunto de datos preprocesado ahora contiene toda la información que necesitamos para entrenar un clasificador en él
+Usaremos los estados ocultos como características de entrada y las etiquetas como objetivos
+Podemos crear fácilmente las matrices correspondientes en el conocido formato Scikit-Learn de la siguiente manera
+Reducción de dimensionalidad con UMAPAntes de entrenar un modelo en los estados ocultos, es una buena práctica realizar una verificación de cordura que proporcionen una representación útil de las emociones que queremos clasificar.
+Dado que visualizar los estados ocultos en 768 dimensiones es complicado, usaremos el potente algoritmo UMAP5 para proyectar los vectores en 2D.
+Dado que UMAP funciona mejor cuando las características se escalan para que se encuentren en el intervalo [0,1], primero aplicaremos un MinMaxScaler y luego usaremos UMAP para reducir los estados ocultos.
+El resultado es una matriz con la misma cantidad de muestras de entrenamiento, pero con solo 2 funciones en lugar de las 768 con las que comenzamos. Investiguemos los datos comprimidos un poco más y tracemos la densidad de puntos para cada categoría por separado.
+NOTA Estas son solo proyecciones en un espacio dimensional inferior
+El hecho de que algunas categorías se superpongan no significa que no sean separables en el espacio original
+Por el contrario, si son separables en el espacio proyectado, lo serán en el espacio original.
+Ahora parece haber patrones más claros; Los sentimientos negativos como la tristeza, la ira y el miedo ocupan regiones similares con distribuciones ligeramente diferentes.
+Por otro lado, la alegría y el amor están bien separados de las emociones negativas y también comparten un espacio similar.
+Finalmente, la sorpresa está esparcida por todo el lugar.
+Esperábamos cierta separación, pero esto no está garantizado de ninguna manera, ya que el modelo no fue entrenado para saber la diferencia entre estas emociones, pero las aprendió implícitamente al predecir las palabras faltantes.
+Entrenando un Clasificador Simple Hemos visto que los estados ocultos son algo diferentes entre las emociones, aunque para varias de ellas no hay un límite obvio
+¡Usemos estos estados ocultos para entrenar un regresor logístico simple con Scikit-Learn! El entrenamiento de un modelo tan simple es rápido y no requiere una GPU
+Al observar la precisión, puede parecer que nuestro modelo es solo un poco mejor que el aleatorio, pero dado que estamos tratando con un conjunto de datos multiclase desequilibrado, esto es significativamente mejor que el aleatorio.
+Podemos tener una mejor idea de si nuestro modelo es bueno comparándolo con una línea de base simple
+En Scikit-Learn hay un DummyClassifier que se puede usar para construir un clasificador con heurísticas simples como elegir siempre la clase mayoritaria o dibujar siempre una clase aleatoria.
+lo que produce una precisión de alrededor del 35%
+Por lo tanto, nuestro clasificador simple con incrustaciones BERT es significativamente mejor que nuestra línea de base
+Podemos investigar más a fondo el rendimiento del modelo observando la matriz de confusión del clasificador, que nos dice la relación entre las etiquetas verdaderas y predichas.
+Podemos ver que la ira y el miedo se confunden con mayor frecuencia con la tristeza, lo que concuerda con la observación que hicimos al visualizar las incrustaciones.
+También el amor y la sorpresa se confunden con frecuencia con alegría.
+Para obtener una imagen aún mejor del rendimiento de la clasificación, podemos imprimir el informe de clasificación de Scikit-Learn y observar la precisión, la recuperación y la puntuación F para cada clase: En la siguiente sección, exploraremos el enfoque de ajuste fino que conduce a una clasificación superior. actuación
+Sin embargo, es importante tener en cuenta que hacer esto requiere muchos más recursos informáticos, como GPU, que podrían no estar disponibles en su empresa.
+En casos como este, un enfoque basado en características puede ser un buen compromiso entre el aprendizaje automático tradicional y el aprendizaje profundo.
+Ajuste fino de los transformadores Exploremos ahora lo que se necesita para ajustar un transformador de principio a fin
+Con el enfoque de ajuste fino, no usamos los estados ocultos como características fijas, sino que los entrenamos como se muestra en la Figura 2-6
+Esto requiere que el cabezal de clasificación sea diferenciable, razón por la cual este método generalmente usa una red neuronal para la clasificación.
+Dado que volvemos a entrenar todos los parámetros de DistilBERT, este enfoque requiere mucho más procesamiento que el enfoque de extracción de funciones y, por lo general, requiere una GPU.
+Dado que entrenamos los estados ocultos que sirven como entradas para el modelo de clasificación, también evitamos el problema de trabajar con datos que pueden no ser adecuados para la tarea de clasificación.
+En cambio, los estados ocultos iniciales se adaptan durante el entrenamiento para disminuir la pérdida del modelo y así aumentar su rendimiento.
+Si el cálculo necesario está disponible, este método se elige comúnmente en lugar del enfoque basado en características, ya que generalmente lo supera.
+Usaremos la API de entrenador de Transformers para simplificar el ciclo de entrenamiento. ¡Veamos los ingredientes que necesitamos para configurar uno! Lo primero que necesitamos es un modelo DistilBERT preentrenado como el que usamos en el enfoque basado en características
+La única pequeña modificación es que usamos el modelo AutoModelForSequenceClassification en lugar de AutoModel
+La diferencia es que el modelo AutoModelForSequenceClassification tiene un cabezal de clasificación encima de las salidas del modelo que se puede entrenar fácilmente con el modelo base.
+Solo necesitamos especificar cuántas etiquetas tiene que predecir el modelo (seis en nuestro caso), ya que esto dicta el número de salidas que tiene el cabezal de clasificación
+Probablemente verá una advertencia de que algunas partes de los modelos se inicializan aleatoriamente
+Esto es normal ya que el jefe de clasificación aún no ha sido capacitado
+Preprocesar los TweetsAdemás de la tokenización también necesitamos establecer el formato de las columnas totorch
+Tensor
+Esto nos permite entrenar el modelo sin necesidad de cambiar entre listas, matrices y tensores.
+Con Datasets podemos usar la función set_format para cambiar el tipo de datos de las columnas que deseamos mantener, mientras eliminamos el resto
+Además, definimos algunas métricas que se monitorean durante el entrenamiento.
+Puede ser cualquier función que tome un objeto de predicción, que contenga las predicciones del modelo, así como las etiquetas correctas, y devuelva un diccionario con valores métricos escalares.
+Supervisaremos la puntuación F y la precisión del modelo.
+Entrenamiento del modelo Aquí también establecemos el tamaño del lote, la tasa de aprendizaje, el número de épocas y también especificamos cargar el mejor modelo al final de la ejecución de entrenamiento.
+Con este ingrediente final, podemos instanciar y ajustar nuestro modelo con TrainerEpochTraining LossValidation LossAccuracyAl observar los registros, podemos ver que nuestro modelo tiene una puntuación F en el conjunto de validación de alrededor del 92 %: ¡esta es una mejora significativa con respecto al enfoque basado en características! También podemos ver que el mejor modelo se guardó ejecutando el método de evaluación: Echemos un vistazo más detallado a las métricas de entrenamiento mediante el cálculo de la matriz de confusión.
+Visualice la matriz de confusión Para visualizar la matriz de confusión, primero debemos obtener las predicciones en el conjunto de validación
+La función de predicción de la clase Trainer devuelve varios objetos útiles que podemos usar para la evaluación
+También contiene las predicciones sin procesar para cada clase.
+Decodificamos las predicciones con avidez con anargmax
+Esto produce la etiqueta predicha y tiene el mismo formato que las etiquetas devueltas por los modelos de Scikit-Learn en el enfoque basado en características.
+Con las predicciones podemos trazar la matriz de confusión nuevamente: podemos ver que las predicciones están mucho más cerca de la matriz de confusión diagonal ideal
+La categoría del amor todavía se confunde a menudo con la alegría que parece natural.
+Además, la sorpresa y el miedo a menudo se confunden y la sorpresa también se confunde con frecuencia con alegría.
+En general, el rendimiento del modelo parece muy bueno.
+Además, mirar el informe de clasificación revela que el modelo también está funcionando mucho mejor para las clases minoritarias como sorpresa
+recuerdof1-scoreapoyotristezaalegríaamoriramiedosorpresaHacer prediccionesTambién podemos usar el modelo ajustado para hacer predicciones sobre nuevos tweets
+Primero, necesitamos tokenizar el texto, pasar el tensor a través del modelo y extraer los logits
+Las predicciones del modelo no están normalizadas, lo que significa que no son una distribución de probabilidad sino los resultados sin procesar antes de la capa softmax
+Podemos hacer fácilmente que las predicciones sean una distribución de probabilidad al aplicarles una función softmax
+Como tenemos un tamaño de lote de 1, podemos deshacernos de la primera dimensión y convertir el tensor en una matriz NumPy para procesar en la CPU
+Podemos ver que las probabilidades ahora están correctamente normalizadas al observar la suma que suma 1
+Análisis de erroresAntes de continuar, debemos investigar un poco más la predicción de nuestro modelo.
+Una herramienta simple pero poderosa es ordenar las muestras de validación por la pérdida del modelo.
+Al pasar la etiqueta durante el pase hacia adelante, la pérdida se calcula automáticamente y se devuelve
+A continuación se muestra una función que devuelve la pérdida junto con la etiqueta predicha
+siguiente
+Etiquetas incorrectas Cada proceso que agrega etiquetas a los datos puede tener fallas; los anotadores pueden cometer errores o no estar de acuerdo, inferir etiquetas de otras características puede fallar
+Si fuera fácil anotar automáticamente los datos, no necesitaríamos un modelo para hacerlo.
+Por lo tanto, es normal que haya algunos ejemplos mal etiquetados
+Con este enfoque podemos encontrarlos y corregirlos rápidamente.
+Peculiaridades del conjunto de datosLos conjuntos de datos en el mundo real siempre son un poco desordenados
+Cuando se trabaja con texto, puede suceder que haya algunos caracteres especiales o cadenas en las entradas que desequilibren el modelo.
+Inspeccionar las predicciones más débiles del modelo puede ayudar a identificar dichas características, y limpiar los datos o inyectar ejemplos similares puede hacer que el modelo sea más sólido.
+Primero echemos un vistazo a las muestras de datos con las pérdidas más altas.
+soy perezoso mis personajes caen en categorias de presumido y/o blas joypersonas y sus frustraciones personas que se sienten incomodadas por engreido y/o blas personasmiedome llamo pro vida y voté por perry sin saber esta información me sentiría traicionado pero además sentiría que había traicionado a dios por apoyando a un hombre que administró una vacuna de apenas un año para niñas pequeñas poniéndolas en peligro para apoyar financieramente a personas cercanas a élalegríatristezatambién recuerdo sentir que todos los ojos estaban puestos en mí todo el tiempo y no de una manera glamorosa y lo odiabaalegríaestoy un poco avergonzado por sentirme así aunque debido a que el entrenamiento de mi madre fue una parte tan maravillosamente definitoria de mi propia vida y amaba y todavía amo ama la tristeza me siento mal por incumplir mi compromiso de llevar donas a los fieles en la iglesia católica de la sagrada familia en columbus ohio ama la tristeza supongo que me siento traicionado porque lo admiraba mucho y por la alegría de que alguien le haga esto a su esposa e hijos va más allá de la palideztristeza cuando noté dos arañas corriendo en el piso en diferentes direccionesiramiedo te dejo matarlo ahora pero de hecho no me siento muy bien hoy toda alegría solo escuchando y mirando a través de la cerca al niño pequeño y popular que tiene su fiesta de cumpleaños con todos sus amigos geniales que siempre has deseado que fueran tuyos Podemos ver claramente que el modelo predijo mal algunas de las etiquetas
+Por otro lado, parece que hay bastantes ejemplos sin una clase clara que podrían estar mal etiquetados o requerir una nueva clase por completo.
+En particular, la alegría parece estar mal etiquetada varias veces
+Con esta información, podemos refinar el conjunto de datos, lo que a menudo puede conducir a una ganancia de rendimiento tanto o mayor como si tuviera más datos o modelos más grandes. Al observar las muestras con las pérdidas más bajas, observamos que el modelo parece tener más confianza al predecir la clase de tristeza.
+Los modelos de aprendizaje profundo son excepcionalmente buenos para encontrar y explotar atajos para llegar a una predicción.
+Una famosa analogía para ilustrar Este es el caballo alemán Hans de principios del siglo XX.
+Hans fue una gran sensación ya que aparentemente era capaz de hacer aritmética simple, como sumar dos números tocando el resultado; una habilidad que le valió el apodo de Clever Hans.
+Estudios posteriores revelaron que Hans en realidad no era capaz de hacer aritmética, pero podía leer el rostro del interrogador y determinar, en función de la expresión facial, cuándo alcanzó el resultado correcto.
+Los modelos de aprendizaje profundo tienden a encontrar exploits similares si las características lo permiten.
+Imagine que construimos un modelo de opinión para analizar los comentarios de los clientes
+Supongamos que, por accidente, el número de estrellas que dio el cliente también se incluyen en el texto.
+En lugar de analizar el texto, el modelo simplemente puede aprender a contar las estrellas en la revisión.
+Cuando implementamos ese modelo en producción y ya no tiene acceso a esa información, tendrá un desempeño deficiente y, por lo tanto, queremos evitar tales situaciones.
+Por esta razón, vale la pena invertir tiempo mirando los ejemplos en los que el modelo tiene más confianza para que podamos estar seguros de que el modelo no explota ciertas características del texto.
+Ahora sabemos que la alegría a veces está mal etiquetada y que la modelo confía más en dar la etiqueta tristeza.
+Con esta información, podemos realizar mejoras específicas en nuestro conjunto de datos y también vigilar la clase en la que el modelo parece tener mucha confianza.
+El último paso antes de entregar el modelo entrenado es guardarlo para su uso posterior.
+La biblioteca Transformer permite hacer esto en unos pocos pasos que mostramos en la siguiente sección
+Guardando el modeloFinalmente, queremos guardar el modelo para poder reutilizarlo en otra sesión o más tarde si queremos ponerlo en producción
+Podemos guardar el modelo junto con el tokenizador correcto en la misma carpeta. La comunidad de PNL se beneficia enormemente al compartir modelos preentrenados y ajustados, y todos pueden compartir sus modelos con otros a través de Hugging Face Model Hub.
+A través de theHub, todos los modelos generados por la comunidad se pueden descargar al igual que descargamos el modelo DistilBert
+Una vez que haya iniciado sesión con sus credenciales de Model Hub, el siguiente paso es crear un repositorio Gitre para almacenar su modelo, tokenizador y cualquier otro archivo de configuración: transformers-cli repo create distilbert-emotionEsto crea un repositorio en Model Hub que se puede clonado y versionado como cualquier otro repositorio de Git
+La única sutileza es que Model Hub usa Git Large File Storage para la versión del modelo, así que asegúrese de instalarlo antes de clonar el repositorio: ahora hemos guardado nuestro primer modelo para más adelante.
+Este no es el final del viaje, sino solo la primera iteración.
+La creación de modelos de rendimiento requiere muchas iteraciones y un análisis exhaustivo. En la siguiente sección, enumeramos algunos puntos para obtener más ganancias de rendimiento.
+Mejoras adicionales Hay una serie de cosas que podríamos intentar mejorar el modelo basado en funciones que entrenamos en este capítulo
+Por ejemplo, dado que los estados ocultos son solo funciones para el modelo, podríamos incluir funciones adicionales o manipular las existentes.
+Los siguientes pasos podrían generar mejoras adicionales y serían buenos ejercicios: Aborde el desequilibrio de clases aumentando o disminuyendo el muestreo de las clases minoritarias o mayoritarias, respectivamente.
+Alternativamente, el desequilibrio también podría abordarse en el modelo de clasificación ponderando las clases
+Agregue más incrustaciones de diferentes modelos
+Hay muchos modelos similares a BERT que tienen un estado oculto o una salida que podríamos usar, como ALBERT, GPT-2 o ELMo.
+Puede concatenar la incrustación de tweets de cada modelo para crear una función de entrada grande
+Aplicar la ingeniería de características tradicional
+Además de usar las incrustaciones de Transformermodels, también podríamos agregar características como la longitud del tweet o si hay ciertos emojis o hashtags presentes.
+Aunque el rendimiento del modelo ajustado ya parece prometedor, todavía hay algunas cosas que puede intentar mejorar: - Utilizamos valores predeterminados para los hiperparámetros, como la tasa de aprendizaje, la disminución del peso y los pasos de calentamiento, que funcionan bien para las tareas de clasificación estándar.
+Sin embargo, el modelo aún podría mejorarse ajustándolos y consulte el Capítulo 5, donde usamos Optuna para ajustar sistemáticamente los hiperparámetros.
+- Los modelos destilados son excelentes por su rendimiento con recursos computacionales limitados
+Para algunas aplicaciones (p.
+gramo
+implementaciones basadas en lotes), la eficiencia puede no ser la principal preocupación, por lo que puede intentar mejorar el rendimiento utilizando el modelo completo
+Para exprimir hasta el último bit de rendimiento, también puede intentar ensamblar varios modelos
+- Descubrimos que algunas etiquetas pueden estar equivocadas, lo que a veces se denomina ruido de etiqueta.
+Volver al conjunto de datos y limpiar las etiquetas es un paso esencial al desarrollar aplicaciones NLP
+- Si el ruido de la etiqueta es una preocupación, también puede pensar en aplicar el suavizado de etiquetas
+6 Suavizar las etiquetas objetivo asegura que el modelo no se vuelva demasiado confiado y traza límites de decisión más claros
+El suavizado de etiquetas ya está integrado en el Entrenador y se puede controlar a través del argumento label_smoothing_factor
+Conclusión ¡Felicitaciones, ahora sabes cómo entrenar un modelo de Transformer para clasificar las emociones en los tweets! Hemos visto dos enfoques complementarios que usan características y ajustes e investigamos sus fortalezas y debilidades.
+Mejorar cualquiera de los modelos es un esfuerzo abierto y enumeramos varias vías para mejorar aún más el modelo y el conjunto de datos.
+Sin embargo, este es solo el primer paso hacia la creación de una aplicación del mundo real con Transformers, así que ¿hacia dónde ir desde aquí? Aquí hay una lista de desafíos que es probable que experimente en el camino que cubrimos en este libro: ¡Mi jefe quiere que mi modelo esté en producción ayer! - En el próximo capítulo, le mostraremos cómo empaquetar nuestro modelo como una aplicación web que puede implementar y compartir con sus colegas.
+¡Mis usuarios quieren predicciones más rápidas! - Ya hemos visto en este capítulo que DistilBER es un enfoque para este problema y en capítulos posteriores profundizaremos en cómo funciona realmente la destilación, junto con otros trucos para acelerar sus modelos de Transformer.
+¿Tu modelo también puede hacer X? - Como mencionamos en este capítulo, los Transformers son extremadamente versátiles y, en el resto del libro, exploraremos una variedad de tareas, como la respuesta a preguntas y el reconocimiento de entidades nombradas, todas usando la misma arquitectura básica.
+¡Ninguno de mis textos está en inglés! - Resulta que los Transformers también vienen en una variedad multilingüe, y los usaremos para abordar tareas en varios idiomas a la vez.
+¡No tengo ninguna etiqueta! - El aprendizaje de transferencia le permite ajustar algunas etiquetas y le mostraremos cómo se pueden usar incluso para anotar de manera eficiente datos sin etiquetar.
+En el próximo capítulo, veremos cómo se pueden usar los transformadores para recuperar información de grandes corpus y encontrar respuestas a preguntas específicas.

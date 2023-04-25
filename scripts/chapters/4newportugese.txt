@@ -1,0 +1,395 @@
+Capítulo 4
+Resposta a perguntasUMA NOTA PARA LEITORES DE LANÇAMENTO ANTECIPADO Com os e-books de lançamento antecipado, você obtém livros em sua forma mais antiga - o conteúdo bruto e não editado do autor conforme eles escrevem - para que você possa aproveitar essas tecnologias muito antes do lançamento oficial desses títulos
+Este será o 4º capítulo do último livro
+Observe que o repositório do GitHub será ativado mais tarde
+Se você tiver comentários sobre como podemos melhorar o conteúdo e/ou os exemplos deste livro, ou se notar falta de material neste capítulo, entre em contato com o editor em mpotter@oreilly
+com
+Seja você um pesquisador, analista ou cientista de dados, é provável que você tenha precisado percorrer oceanos de documentos para encontrar as informações que procura.
+Para piorar a situação, você é constantemente lembrado pelo Google e pelo Bing de que existem maneiras melhores de pesquisar! Por exemplo, se pesquisarmos “Quando Marie Curie ganhou seu primeiro Prêmio Nobel?” no Google, obtemos imediatamente a resposta correta de “1903”, conforme ilustrado na Figura 4-1
+Figura 4-1
+Uma consulta de pesquisa do Google e o snippet de resposta correspondente
+Neste exemplo, o Google primeiro recuperou cerca de 319.000 documentos relevantes para a consulta e, em seguida, executou uma etapa de processamento adicional para extrair o snippet de resposta com a passagem e a página da web correspondentes
+Não é difícil ver por que esses trechos de resposta são úteis
+Por exemplo, se pesquisarmos uma pergunta mais complicada como “Qual país tem mais casos de COVID-19?”, o Google não fornece uma resposta e, em vez disso, temos que clicar em uma das páginas da web retornadas pelo mecanismo de pesquisa para encontrá-la.
+1A abordagem geral por trás dessa tecnologia é chamada de resposta a perguntas (QA)
+Existem muitos tipos de controle de qualidade, mas o mais comum é o controle de qualidade extrativo, que envolve perguntas cujas respostas podem ser identificadas como um trecho de texto em um documento, onde o documento pode ser uma página da web, contrato legal ou artigo de notícias
+O processo de dois estágios de primeiro recuperar documentos relevantes e, em seguida, extrair respostas deles também é a base para muitos sistemas modernos de controle de qualidade, incluindo mecanismos de pesquisa semântica, assistentes inteligentes e extratores de informações automatizados.
+Neste capítulo, aplicaremos esse processo para resolver um problema comum enfrentado por sites de comércio eletrônico: ajudar os consumidores a responder a perguntas específicas para avaliar um produto
+Veremos que as avaliações dos clientes podem ser usadas como uma fonte rica e desafiadora de informações para o controle de qualidade e, ao longo do caminho, aprenderemos como os transformadores agem como poderosos modelos de compreensão de leitura que podem extrair significado do texto
+Vamos começar detalhando o caso de uso
+Este capítulo se concentra no controle de qualidade extrativo, mas outras formas de controle de qualidade podem ser mais adequadas para o seu caso de uso
+Por exemplo, o controle de qualidade da comunidade envolve a coleta de pares de perguntas e respostas que são gerados por usuários em fóruns como o Stack Overflow e, em seguida, o uso de pesquisa de similaridade semântica para encontrar a resposta correspondente mais próxima a uma nova pergunta
+Notavelmente, também é possível fazer QA sobre tabelas, e modelos de transformadores como o TAPAS podem até mesmo realizar agregações para produzir a resposta final! Há também o QA de formato longo, que visa gerar respostas complexas de comprimento de parágrafo para perguntas abertas como "Por que o céu é azul?"
+Você pode encontrar uma demonstração interativa de controle de qualidade de formato longo no site Hugging Face
+Construindo um sistema de controle de qualidade baseado em avaliações Se você já comprou um produto on-line, provavelmente contou com as avaliações dos clientes para ajudar a informar sua decisão
+Essas análises geralmente podem ajudar a responder a perguntas específicas como “essa guitarra vem com uma alça?” ou “posso usar esta câmera à noite?” isso pode ser difícil de responder apenas pela descrição do produto
+No entanto, produtos populares podem ter centenas a milhares de comentários, então pode ser um grande empecilho encontrar um que seja relevante
+Uma alternativa é postar sua pergunta nas plataformas de controle de qualidade da comunidade fornecidas por sites como a Amazon, mas geralmente leva dias para obter uma resposta (se houver).
+Não seria bom se pudéssemos obter uma resposta imediata como o exemplo do Google da Figura 4-1? Vamos ver se podemos fazer isso usando transformadores! O conjunto de dados Para construir nosso sistema de controle de qualidade, usaremos o conjunto de dados SubjQA 2, que consiste em mais de 10.000 avaliações de clientes em inglês sobre produtos e serviços em seis domínios: TripAdvisor, restaurantes, filmes, livros, Eletrônicos e Mercearia
+Conforme ilustrado na Figura 4-2, cada revisão está associada a uma pergunta que pode ser respondida usando uma ou mais frases da revisão.
+3Figura 4-2
+Uma pergunta sobre um produto e a avaliação correspondente
+O intervalo de resposta está sublinhado
+O interessante desse conjunto de dados é que a maioria das perguntas e respostas são subjetivas, ou seja, dependem da experiência pessoal dos usuários
+O exemplo na Figura 4-2 mostra por que esse recurso é potencialmente mais difícil do que encontrar respostas para perguntas factuais como "Qual é a moeda do Reino Unido?"
+Primeiro, a consulta é sobre “qualidade ruim”, que é subjetiva e depende da definição de qualidade do usuário
+Em segundo lugar, partes importantes da consulta não aparecem na revisão, o que significa que não pode ser respondida com atalhos como pesquisa por palavra-chave ou parafraseando a pergunta de entrada
+Esses recursos tornam o SubjQA um conjunto de dados realista para comparar nossos modelos de controle de qualidade baseados em revisão, uma vez que o conteúdo gerado pelo usuário, como o mostrado na Figura 4-2, se assemelha ao que podemos encontrar na natureza.
+Os sistemas NOTEQA geralmente são categorizados pelo domínio de dados aos quais eles têm acesso ao responder a uma consulta
+O controle de qualidade de domínio fechado lida com perguntas sobre um tópico específico (p.
+g
+uma única categoria de produto), enquanto o domínio aberto lida com perguntas sobre quase tudo (e
+g
+todo o catálogo de produtos da Amazon)
+Em geral, o controle de qualidade de domínio fechado envolve a pesquisa em menos documentos do que o caso de domínio aberto
+Para nosso caso de uso, focaremos na criação de um sistema de controle de qualidade para o domínio Eletrônicos. Para começar, vamos baixar o conjunto de dados do Hugging Face Hub: from datasets import load_datasetsubjqa = load_dataset("subjqa", "electronics") Em seguida, vamos converter o conjunto de dados para o formato pandas para que possamos explorá-lo um pouco mais facilmente:Número de perguntas no trem: 1295Número de perguntas no teste: 358Número de perguntas na validação: 255Repare que o conjunto de dados é relativamente pequeno, com apenas 1.908 exemplos no total
+Isso simula um cenário do mundo real, já que obter especialistas de domínio para rotular conjuntos de dados de controle de qualidade extrativos é trabalhoso e caro
+Por exemplo, estima-se que o conjunto de dados CUAD para controle de qualidade extrativo em contratos legais tenha um valor de $ 2 milhões para contabilizar o conhecimento jurídico e o treinamento dos anotadores! Existem algumas colunas no conjunto de dados SubjQA, mas as mais interessantes para construir nosso O sistema QA é mostrado na Tabela 4-1
+O Amazon Standard Identification Number (ASIN) associado a cada produtorespostas
+answer_text A extensão do texto na revisão marcada pelo anotadorrespostas
+answer_start O índice do caractere inicial da resposta spancontextA revisão do clienteVamos nos concentrar nessas colunas e dar uma olhada em alguns dos exemplos de treinamento usando o DataFrame
+função de amostra para selecionar uma amostra aleatória: qa_cols = ["título", "pergunta", "respostas
+texto","respostas
+answer_start", "context"]sample_df = dfs["train"][qa_cols]
+sample(2, random_state=7)display_df(sample_df, index=False)Gosto muito deste teclado
+Dou 4 estrelas porque não tem a tecla CAPS LOCK, então nunca sei se o caps está ativado
+Mas pelo preço, realmente é suficiente como um teclado sem fio
+Tenho mãos muito grandes e este teclado é compacto, mas não tenho queixas
+Eu comprei isso depois que a primeira bateria gopro sobressalente que comprei não segurava a carga
+Tenho expectativas muito realistas desse tipo de produto, sou cético em relação a histórias incríveis de tempo de carga e duração da bateria, mas espero que as baterias mantenham a carga por pelo menos algumas semanas e que o carregador funcione como um carregador
+Nisso não me decepcionei
+Eu sou uma viga de rio e descobri que o gopro queima energia com pressa, então esta compra resolveu esse problema
+as baterias mantinham a carga, em viagens mais curtas as duas baterias extras eram suficientes e em viagens mais longas eu poderia usar meus amigos JOOS Orange para recarregá-las
+Acabei de comprar um newtrent xtreme powerpak e espero poder carregá-los com ele para não ficar sem energia novamente
+A partir desses exemplos podemos fazer algumas observações
+Primeiro, as perguntas não estão gramaticalmente corretas, o que é bastante comum nas seções de perguntas frequentes dos sites de comércio eletrônico
+Em segundo lugar, uma resposta vazia
+entrada de texto denota perguntas cuja resposta não pode ser encontrada na revisão
+Por fim, podemos usar o índice inicial e o comprimento do answerspan para dividir o span do texto na revisão que corresponde à resposta:start_idx = sample_df["answers
+answer_start"]
+iloc[0][0]end_idx = start_idx + len(sample_df["respostas
+texto"]
+iloc[0][0])sample_df["contexto"]
+iloc[0][start_idx:end_idx]'este teclado é compacto'Em seguida, vamos ter uma ideia de quais tipos de perguntas estão no conjunto de treinamento contando as perguntas que começam com algumas palavras iniciais comuns:Podemos ver que as perguntas que começam com “Como”, “O que” e “É” são os mais comuns, então vamos dar uma olhada em alguns exemplos: Como é a câmera? O que você acha do controle? Qual é a velocidade do carregador? O que é direção? a qualidade da construção da bolsa?Qual é a sua impressão sobre o produto?É assim que o zoom funciona?O som é nítido?É um teclado sem fio?Para completar nossa análise exploratória, vamos visualizar a distribuição de comentários associados a cada produto no conjunto de treinamento Aqui vemos que a maioria dos produtos tem uma revisão, enquanto um tem mais de cinquenta
+Na prática, nosso conjunto de dados rotulados seria um subconjunto de um corpus não rotulado muito maior, então essa distribuição presumivelmente reflete as limitações do procedimento de anotação
+Agora que exploramos um pouco nosso conjunto de dados, vamos mergulhar na compreensão de como os transformadores podem extrair respostas do texto
+Extraindo respostas do texto A primeira coisa que precisaremos para o nosso sistema de controle de qualidade é encontrar uma maneira de identificar respostas em potencial como um trecho de texto em uma revisão do cliente
+Por exemplo, se tivermos uma pergunta como "É à prova d'água?" e a passagem de revisão é "Este relógio é à prova d'água a 30m de profundidade", então o modelo deve produzir "à prova d'água a 30m"
+Para fazer isso, precisamos entender como: Enquadrar o problema de aprendizado supervisionado
+Tokenizar e codificar texto para tarefas de controle de qualidade
+Lide com passagens longas que excedem o tamanho máximo de contexto de um modelo
+Vamos começar dando uma olhada em como enquadrar o problema
+Classificação de span A maneira mais comum de extrair respostas do texto é enquadrar o problema como uma tarefa de classificação de span, onde os tokens de início e fim de um span de resposta atuam como os rótulos que um modelo precisa prever
+Este processo é ilustrado na Figura 4-3
+Figura 4-3
+O chefe de classificação de span para tarefas de controle de qualidade
+Como nosso conjunto de treinamento é relativamente pequeno, com apenas 1.295 exemplos, uma boa estratégia é começar com um modelo de linguagem que já tenha sido ajustado em um conjunto de dados de controle de qualidade em grande escala, como o Stanford Question Answering Dataset (SQuAD).
+4 Em geral, esses modelos têm fortes capacidades de compreensão de leitura e servem como uma boa linha de base para a construção de um sistema mais preciso
+Você pode encontrar uma lista de modelos de controle de qualidade extrativos navegando até Hugging Face Hub e pesquisando por “esquadrão” na guia Modelos
+Figura 4-4
+Uma seleção de modelos de controle de qualidade extrativos no Hugging Face Hub
+Conforme mostrado na Figura 4-4, há mais de 180 modelos de controle de qualidade para escolher, então qual deles devemos escolher? Embora a resposta dependa de vários fatores, como se seu corpus é mono ou multilíngue e as restrições de execução um ambiente de produção, a Tabela 4-2 coleta alguns modelos que fornecem uma boa base para construir
+Uma versão destilada do BERT-base que preserva 99% do desempenho enquanto é duas vezes mais rápidoRoBERTa-baseOs modelosRoBERTa têm melhor desempenho do que seus equivalentes BERT e podem ser ajustados na maioria dos conjuntos de dados de controle de qualidade usando um único GPUALBERT-XXLSdesempenho de última geração no SQUAD 2
+0, mas computacionalmente intensivo e difícil de implantarXLM-RoBERTarge modelo multilíngue para 100 idiomas com forte desempenho zero-shotTokenizing Text for QAPara os propósitos deste capítulo, usaremos um modelo MiniLM ajustado5, pois é rápido para treinar e nos permitirá iterar nas técnicas que iremos explorar
+Como de costume, a primeira coisa que precisamos é de um tokenizador para codificar nossos textos, então vamos carregar o ponto de verificação do modelo do Hugging Face Hub da seguinte maneira: from Transformers import AutoTokenizermodel_ckpt = "deepset/minilm-uncased-squad2"tokenizer = AutoTokenizer
+from_pretrained(model_ckpt)Para ver o modelo em ação, vamos primeiro tentar extrair uma resposta de uma curta passagem de texto
+Em tarefas extrativas de controle de qualidade, as entradas são fornecidas como tuplas (pergunta, contexto), portanto, passamos ambas para o tokenizador da seguinte maneira: Aqui retornamos a tocha
+Objetos tensores, pois precisaremos deles para executar a passagem direta pelo modelo
+Se visualizarmos as entradas tokenizadas como uma tabela: também podemos ver os conhecidos tensores input_ids e Attention_mask, enquanto o tensor token_type_ids indica qual parte das entradas corresponde à pergunta e ao contexto (um 0 indica um token de pergunta, um 1 indica um token de contexto)
+6 Para entender como o tokenizador formata as entradas para tarefas de QA, vamos decodificar o tensor input_ids: Vemos que para cada exemplo de QA, as entradas assumem o formato:[CLS] question tokens [SEP] context tokens [SEP] onde a localização do primeiro token [SEP] é determinado pelo token_type_ids
+Agora que nosso texto está marcado, precisamos apenas instanciar o modelo com um cabeçote QA e executar as entradas através da passagem direta: Conforme ilustrado na Figura 4-3, o cabeçote QA corresponde a uma camada linear que recebe os estados ocultos do codificador7 e calcula os logits para os vãos inicial e final
+Para converter as saídas em um intervalo de resposta, primeiro precisamos obter os logits para os tokens inicial e final: start_scores = outputs
+start_logitsend_scores = saídas
+end_logits Conforme ilustrado na Figura 4-5, cada token de entrada recebe uma pontuação do modelo, com pontuações positivas maiores correspondendo a candidatos mais prováveis ​​para os tokens inicial e final
+Neste exemplo, podemos ver que o modelo atribui as pontuações mais altas do token inicial aos números “1” e “6000”, o que faz sentido, pois nossa pergunta é sobre uma quantidade
+Da mesma forma, vemos que os tokens finais com pontuação mais alta são “minutos” e “horas”
+Figura 4-5
+Logs previstos para os tokens de início e fim
+O token com a pontuação mais alta é colorido em laranja
+Para obter a resposta final, podemos calcular o argmax sobre as pontuações dos tokens inicial e final e, em seguida, dividir o intervalo das entradas
+O código a seguir faz essas etapas e decodifica o resultado para que possamos imprimir o texto resultante: Pergunta: Quanta música isso pode conter?Resposta: 6000 horasÓtimo, funcionou! No Transformers, todas essas etapas de pré-processamento e pós-processamento são convenientemente agrupadas em um QuestionAnsweringPipeline dedicado
+Podemos instanciar o pipeline passando nosso tokenizador e modelo de ajuste fino da seguinte forma: Além da resposta, o pipeline também retorna a estimativa de probabilidade do modelo (obtida tomando um softmax sobre os logits), o que é útil quando queremos comparar várias respostas dentro de um único contexto
+Também mostramos que o modelo pode prever várias respostas especificando o parâmetro topk
+Às vezes, é possível ter perguntas para as quais nenhuma resposta é possível, como as respostas vazias
+exemplos answer_start em SubjQA
+Nesses casos, o modelo atribuirá uma pontuação inicial e final alta ao token [CLS] e o pipeline mapeará essa saída para uma string vazia: NOTA Em nosso exemplo simples, obtivemos os índices inicial e final tomando o argmax dos logits correspondentes
+No entanto, esta heurística pode produzir respostas fora do escopo (e
+g
+ele pode selecionar tokens que pertencem à pergunta em vez do contexto), portanto, na prática, o pipeline calcula a melhor combinação de índices iniciais e finais sujeitos a várias restrições, como estar dentro do escopo, os índices iniciais devem preceder os índices finais e assim por diante
+Lidando com longas passagens Uma sutileza enfrentada pelos modelos de compreensão de leitura é que o contexto geralmente contém mais tokens do que o comprimento máximo da sequência do modelo, que geralmente é de algumas centenas de tokens no máximo
+Conforme ilustrado na Figura 46, uma parte decente do conjunto de treinamento SubjQA contém pares de contexto de perguntas que não se encaixam no contexto do modelo
+Figura 4-6
+Distribuição de tokens para cada par de contexto de pergunta no conjunto de treinamento SubjQA
+Para outras tarefas, como classificação de texto, simplesmente truncamos textos longos sob a suposição de que informações suficientes estavam contidas na incorporação do token [CLS] para gerar previsões precisas
+No entanto, para controle de qualidade, essa estratégia é problemática porque a resposta a uma pergunta pode estar perto do final do contexto e seria removida por truncamento
+Conforme ilustrado na Figura 4-7, a maneira padrão de lidar com isso é aplicar uma janela deslizante entre as entradas, onde cada janela contém uma passagem de tokens que se encaixam no contexto do modelo.
+Figura 4-7
+Como a janela deslizante cria vários pares de contexto de pergunta para documentos longos
+Em Transformers, a janela deslizante é habilitada definindo return_overflowing_tokens=True no tokenizer, com o tamanho da janela deslizante controlado pelo argumento max_seq_length e o tamanho do passo controlado por doc_stride
+Vamos pegar o primeiro exemplo do nosso conjunto de treinamento e definir uma pequena janela para ilustrar como isso funciona: exemplo = dfs["train"]
+iloc[0][["question", "context"]]tokenized_example = tokenizer(example["question"], example["context"],return_overflowing_tokens=True, max_length=100,stride=25)Nesse caso, agora obter uma lista de input_ids, um para cada janela
+Vamos verificar o número de tokens que temos em cada janela:Finalmente podemos ver onde duas janelas se sobrepõem decodificando as entradas:[CLS] como está o baixo? [SEP] e não se sinta pesado ou pressionado em seus ouvidos mesmo> depois de ouvir música com eles o dia todo
+o som é noite e dia> melhor do que qualquer ouvido - bud poderia ser e é quase tão bom quanto o pro 4aa
+> são fones de ouvido "ao ar livre" então você não consegue igualar o baixo aos tipos selados, mas chega perto
+por $ 32, você não pode errar
+[SEP]Agora que temos alguma intuição sobre como os modelos de controle de qualidade podem extrair respostas do texto, vamos ver os outros componentes de que precisamos para criar um pipeline de controle de qualidade de ponta a ponta
+O CONJUNTO DE DADOS DE RESPOSTA DE PERGUNTAS DE STANFORD O formato (pergunta, revisão, [frases de resposta]) do SubjQA é comumente usado em conjuntos de dados extrativos de controle de qualidade e foi pioneiro no SQuAD, que é um conjunto de dados famoso usado para testar a capacidade das máquinas de ler uma passagem de texto e responder a perguntas sobre isso
+O conjunto de dados foi criado por amostragem de várias centenas de artigos em inglês da Wikipédia, particionando cada artigo em parágrafos e, em seguida, pedindo a crowdworkers para gerar um conjunto de perguntas e respostas para cada parágrafo.
+Na primeira versão do SQuAD, cada resposta a uma pergunta tinha a garantia de existir na passagem correspondente e não demorou muito para que os modelos de sequência tivessem um desempenho melhor do que os humanos ao extrair o trecho correto de texto com a resposta.
+Para tornar a tarefa mais difícil, o SQuaD2
+08 foi criado aumentando o SQUAD 1
+1 com um conjunto de questões contraditórias que são relevantes para uma determinada passagem, mas não podem ser respondidas apenas com o texto
+No momento da redação deste livro, o estado da arte é mostrado na Figura 4-8, com a maioria dos modelos desde 2019 superando o desempenho humano
+Figura 4-8
+Progresso no SQUAD 2
+0 referência
+Imagem de Papers With Code No entanto, esse desempenho sobre-humano não parece refletir uma compreensão de leitura genuína, pois as respostas sem resposta podem ser identificadas por meio de padrões nas passagens como antônimos
+Para resolver esses problemas, o Google lançou o conjunto de dados Natural Questions (NQ)9, que envolve perguntas de busca de fatos obtidas dos usuários da Pesquisa Google
+As respostas no NQ são muito mais longas do que no SQuAD e apresentam um benchmark mais desafiador
+Usando Haystack para construir um pipeline de controle de qualidadeEm nosso exemplo de extração de resposta simples, fornecemos a pergunta e o contexto para o modelo
+No entanto, na realidade, os usuários de nosso sistema fornecerão apenas uma pergunta sobre um produto; portanto, precisamos selecionar passagens relevantes entre todas as avaliações em nosso corpus.
+Uma maneira de fazer isso seria concatenar todas as análises de um determinado produto e alimentá-las ao modelo como um único e longo contexto
+Embora simples, a desvantagem dessa abordagem é que o contexto pode se tornar extremamente longo e, assim, introduzir uma latência inaceitável para as consultas de nossos usuários
+Por exemplo, vamos supor que, em média, cada produto tenha 30 avaliações e cada avaliação leve 100 milissegundos para ser processada.
+Se precisarmos processar todas as revisões para obter uma resposta, isso daria uma latência média de três segundos por consulta do usuário - muito tempo para sites de comércio eletrônico! Para lidar com isso, os sistemas modernos de controle de qualidade geralmente são baseados na arquitetura Retriever-Reader , que possui dois componentes principais: Recuperador Responsável por recuperar documentos relevantes para uma determinada consulta
+Retrievers são geralmente categorizados como esparsos ou densos
+Recuperadores esparsos usam representações vetoriais esparsas dos documentos para medir quais termos correspondem a uma consulta
+Dense Retrievers usam codificadores como transformadores ou LSTMs para codificar uma consulta e documentar em dois vetores respectivos de comprimento idêntico
+A relevância de uma consulta e de um documento é então determinada calculando um produto interno dos vetores
+LeitorResponsável por extrair uma resposta dos documentos fornecidos pelo Recuperador
+O Leitor geralmente é um modelo de compreensão de leitura, embora veremos no final do capítulo exemplos de modelos que podem gerar respostas de forma livre
+Conforme ilustrado na Figura 4-9, também pode haver outros componentes que aplicam o pós-processamento aos documentos buscados pelo Retriever ou às respostas extraídas pelo Reader.
+Por exemplo, os documentos recuperados podem precisar ser reclassificados para eliminar os ruidosos ou irrelevantes que podem confundir o Leitor
+Da mesma forma, o pós-processamento das respostas do theReader geralmente é necessário quando a resposta correta vem de várias passagens em um longo documento
+Figura 4-9
+A arquitetura Retriever-Reader para sistemas modernos de controle de qualidade
+Para construir nosso sistema de QA, usaremos a biblioteca Haystack que é desenvolvida pela deepset, uma empresa alemã focada em PNL
+A vantagem de usar o Haystack é que ele é baseado na arquitetura Retriever-Reader, abstrai grande parte da complexidade envolvida na construção desses sistemas e integra-se perfeitamente com os Transformers
+Você pode instalar o Haystack com o seguinte comando pip:pip install farm-haystackAlém do Retriever e do Reader, há mais dois componentes envolvidos na construção de um pipeline QA com Haystack:Document storeUm banco de dados orientado a documentos que armazena documentos e metadados que são fornecidos ao Recuperador em tempo de consulta
+PipelineCombina todos os componentes de um sistema de controle de qualidade para permitir fluxos de consulta personalizados, mesclar documentos de vários Retrievers e muito mais
+Nesta seção, veremos como podemos usar esses componentes para criar rapidamente um protótipo de pipeline de controle de qualidade e, posteriormente, examinar como podemos melhorar seu desempenho.
+Inicializando um armazenamento de documentos No Haystack, há vários armazenamentos de documentos para escolher e cada um pode ser emparelhado com um conjunto dedicado de Retrievers
+Isso é ilustrado na Tabela 4-3, onde a compatibilidade de Retrievers esparsos (TF-IDF, BM25) e densos (Embedding, DPR) é mostrada para cada um dos armazenamentos de documentos disponíveis
+Como exploraremos retrievers esparsos e densos neste capítulo, usaremos o ElasticsearchDocumentStore, que é compatível com ambos os tipos de retriever
+O Elasticsearch é um mecanismo de pesquisa capaz de lidar com uma ampla variedade de dados, incluindo textuais, numéricos, geoespaciais, estruturados e não estruturados
+Sua capacidade de armazenar grandes volumes de dados e filtrá-los rapidamente com recursos de pesquisa de texto completo o torna especialmente adequado para o desenvolvimento de sistemas de QA
+Ele também tem a vantagem de ser o padrão do setor para análise de infraestrutura, portanto, há uma boa chance de sua empresa já ter um cluster com o qual você possa trabalhar.
+Para inicializar o armazenamento de documentos, primeiro precisamos baixar e instalar o Elasticsearch
+Seguindo o guia do Elasticsearch, vamos pegar a versão mais recente para Linux10 com wget e em seguida, precisamos iniciar o servidor Elasticsearch
+Como estamos executando todo o código deste livro nos Jupyternotebooks, precisaremos usar o subprocesso do Python
+Módulo Popen para gerar um novo processo
+Enquanto estamos nisso, vamos também executar o subprocesso em segundo plano usando o comando chown shell: No módulo Popen, os args especificam o programa que desejamos executar, enquanto stdout=PIPE cria um newpipe para a saída padrão e stderr =STDOUT coleta os erros no mesmo pipe
+O preexec_fnargument especifica o ID do subprocesso que desejamos usar
+Por padrão, o Elasticsearch é executado localmente na porta 9200, então podemos testar a conexão enviando uma solicitação HTTP para Agora que nosso servidor Elasticsearch está funcionando, a próxima coisa a fazer é instanciar o armazenamento de documentos: Elasticsearch: um chamado document para (você adivinhou) armazenar documentos e outro chamado label para armazenar os spans de resposta anotados
+Por enquanto, vamos apenas preencher o índice do documento com as revisões do SubjQA, e os armazenamentos de documentos do Haystack esperam uma lista de dicionários com texto e chaves meta da seguinte forma: Os campos no meta podem ser usados ​​para aplicar filtros durante a recuperação, portanto, para nossos propósitos, Incluirá as colunas item_id e q_review_id do SubjQA para que possamos filtrar por produto e ID da pergunta, junto com a divisão de treinamento correspondente
+Podemos então percorrer os exemplos em cada DataFrame e adicioná-los ao índice com a função write_documents da seguinte forma: for split, df in dfs
+items():Ótimo, carregamos todas as nossas avaliações em um índice! Para pesquisar o índice, precisaremos de um Retriever, então vamos ver como podemos inicializar um para o Elasticsearch
+Inicializando um Retriever O armazenamento de documentos Elasticsearch pode ser emparelhado com qualquer um dos Haystack retrievers, então vamos começar usando um sparseretriever baseado em BM25 (abreviação de “Best Match 25”)
+BM25 é uma versão aprimorada da métrica clássica TF-IDF e representa a pergunta e o contexto como vetores esparsos que podem ser pesquisados ​​com eficiência no Elasticsearch
+A pontuação do BM25 mede quanto texto correspondente é sobre uma consulta de pesquisa e melhora o TF-IDF saturando os valores do TF rapidamente e normalizando o tamanho do documento para que os documentos curtos sejam preferidos aos longos
+11No Haystack, o BM25 Retriever está incluído no ElasticsearchRetriever, então vamos inicializar esta classe especificando o armazenamento de documentos que desejamos pesquisar: from haystack
+retriever
+sparse import ElasticsearchRetrieveres_retriever = ElasticsearchRetriever(document_store=document_store) Em seguida, vamos ver uma consulta simples para um único produto eletrônico no conjunto de treinamento
+Para sistemas de controle de qualidade baseados em avaliações como o nosso, é importante restringir as consultas a um único item, porque, caso contrário, o Retriever forneceria avaliações sobre produtos que não estão relacionados à consulta de um usuário
+Por exemplo, perguntar “A qualidade da câmera é boa?” sem um filtro de produto pode retornar comentários sobre telefones, quando o usuário pode estar perguntando sobre uma câmera de laptop específica
+Por si só, os valores ASIN em nosso conjunto de dados são um pouco enigmáticos, mas podemos decifrá-los com ferramentas online como amazon ASIN ou simplesmente anexando o valor de item_id ao www
+Amazonas
+com/dp/URL
+O ID do item abaixo corresponde a um dos tablets Fire da Amazon, então vamos usar a função retrieve do Retriever para perguntar se ele é bom para leitura: Aqui especificamos quantos documentos retornar com o argumento top_k e aplicamos um filtro em theitem_id chaves divididas que foram incluídas no campo meta de nossos documentos
+Cada elemento de retrieved_docs é um objeto Haystack Document que é usado para representar documentos e inclui a pontuação da consulta do Retriever junto com outros metadados
+Vamos dar uma olhada em um dos documentos recuperados:retrieved_docs[0]Além do texto do documento, podemos ver a pontuação que o Elasticsearch calculou por sua relevância para a consulta (pontuações maiores implicam em uma correspondência melhor)
+Sob o capô, o Elasticsearch depende do Lucene para indexação e pesquisa, portanto, por padrão, ele usa a função prática de pontuação do Lucene
+Você pode encontrar os detalhes minuciosos por trás da função de pontuação na documentação do Elasticsearch, mas, em termos breves, a função de pontuação primeiro filtra os documentos candidatos aplicando um teste booleano (o documento corresponde à consulta?), e então aplica uma métrica de similaridade baseada na representação tanto o documento quanto a consulta como vetores
+Agora que temos uma maneira de recuperar documentos relevantes, a próxima coisa que precisamos é uma maneira de extrair respostas deles
+É aqui que entra o Reader, então vamos dar uma olhada em como podemos carregar nosso modelo MiniLM no Haystack
+Inicializando um Reader No Haystack, existem dois tipos de Readers que podem ser usados ​​para extrair respostas de um determinado contexto: FARMReaderBaseado na estrutura FARM do deepset para ajuste fino e implantação de transformadores
+Compatível com modelos treinados usando Transformers e pode carregar modelos diretamente do Hugging Face Hub
+TransformersReaderCom base no QuestionAnsweringPipeline de Transformers
+Adequado apenas para execução de inferência
+Embora ambos os Readers lidem com os pesos de um modelo da mesma maneira, existem algumas diferenças na forma como as previsões são convertidas para produzir respostas: Em Transformers, o QuestionAnsweringPipeline normaliza os logits iniciais e finais com um softmax em cada passagem
+Isso significa que só faz sentido comparar as pontuações das respostas entre as respostas extraídas da mesma passagem, onde as probabilidades somam um
+Por exemplo, uma pontuação de resposta de 0
+9 de uma passagem não é necessariamente melhor do que uma pontuação de 0
+8 em outro
+No FARM, os logits não são normalizados, então as respostas entre passagens podem ser comparadas mais facilmente
+Às vezes, o TransformersReader prevê a mesma resposta duas vezes, mas com pontuações diferentes
+Isso pode acontecer em contextos longos se a resposta estiver em duas janelas sobrepostas
+No FARM, essas duplicatas são removidas
+Como ajustaremos o Reader mais adiante neste capítulo, usaremos o FARMReader
+Semelhante aos Transformers, para carregar o modelo, precisamos apenas especificar o ponto de verificação MiniLM no Hugging Face Hub junto com alguns argumentos específicos do controle de qualidade: do palheiro
+leitor
+farm import FARMReadermodel_ckpt = "deepset/minilm-uncased-squad2"max_seq_length, doc_stride = 384, 128reader = FARMReader(model_name_or_path=model_ckpt, progress_bar=False,max_seq_len=max_seq_length, doc_stride=doc_stride,return_no_answer=True)NOTATambém é possível ajustar ajuste um modelo de compreensão de leitura diretamente no Transformers e, em seguida, carregue-o no TransformersReader para executar a inferência
+Para obter detalhes sobre como fazer a etapa de ajuste fino, consulte o tutorial de resposta a perguntas na Grande Tabela de Tarefas dos Transformers
+No FARMReader, o comportamento da janela deslizante é controlado pelos mesmos argumentos max_seq_length edoc_stride que vimos para o tokenizer, e usamos os valores do documento MiniLM
+Como verificação de sanidade, vamos agora testar o Reader em nosso exemplo simples anterior: Ótimo, o Reader parece estar funcionando conforme o esperado, então, a seguir, vamos unir todos os nossos componentes usando um dos pipelines do Haystack
+Juntando tudo Haystack fornece uma abstração de Pipeline que nos permite combinar Recuperadores, Leitores e outros componentes juntos como um gráfico que pode ser facilmente personalizado para cada caso de uso
+Existem também pipelines predefinidos análogos aos dos Transformers, mas especializados para sistemas de controle de qualidade
+No nosso caso, estamos interessados ​​em extrair respostas, então usaremos o ExtractiveQAPipeline, que usa um único par Retriever-Reader como seus argumentos:Cada Pipeline tem uma função de execução que especifica como o fluxo de consulta deve ser executado
+ParaExtractiveQAPipeline só precisamos passar a query, a quantidade de documentos a recuperar com top_k_retriever, e a quantidade de respostas a extrair desses documentos com top_k_reader
+Em nosso caso, também precisamos especificar um filtro sobre o ID do item, o que pode ser feito usando o argumento filter como fizemos com o Retriever anteriormente
+Vamos executar um exemplo simples usando nossa pergunta sobre o tablet Amazon Fire novamente, mas desta vez retornando as respostas extraídas: Ótimo, agora temos um sistema de controle de qualidade de ponta a ponta para análises de produtos da Amazon! Este é um bom começo, mas observe que a segunda e a terceira resposta estão mais próximas do que a pergunta realmente está pedindo
+Para fazer melhor, primeiro precisaremos de algumas métricas para quantificar o desempenho do Recuperador e do Leitor
+Vamos dar uma olhada
+Melhorando nosso pipeline de controle de qualidade Embora grande parte da pesquisa recente sobre controle de qualidade tenha se concentrado em melhorar os modelos de compreensão de leitura, na prática não importa o quão bom seja o seu leitor se o recuperador não conseguir encontrar os documentos relevantes em primeiro lugar! Em particular, o Retriever define um limite superior para o desempenho de todo o sistema de controle de qualidade, por isso é importante garantir que ele esteja fazendo um bom trabalho.
+Com isso em mente, vamos começar apresentando métricas para avaliar o Retriever e comparar o desempenho de representações esparsas e densas
+Avaliando o Recuperador Uma métrica comum para avaliar os Recuperadores é a revocação, que mede a fração de todos os documentos relevantes que são recuperados
+Nesse contexto, relevante significa simplesmente se a resposta está presente em uma passagem de texto ou não, portanto, dado um conjunto de perguntas, podemos calcular a recordação contando o número de vezes que uma resposta aparece nos principais kdocumentos retornados pelo Retriever
+NOTA Uma métrica complementar a ser lembrada é a precisão média média (mAP), que recompensa os Retrievers que podem colocar as respostas corretas mais acima na classificação do documento
+No Haystack, há duas maneiras de avaliar Retrievers: Use a função de avaliação integrada do Retriever
+Isso pode ser usado para QA de domínio aberto e fechado, mas não para conjuntos de dados como SubjQA, onde cada documento é emparelhado com um único produto e precisamos filtrar o ID do subproduto para cada consulta
+Crie um pipeline personalizado que combine um Retriever com a classe EvalRetriever
+Isso permite a possibilidade de implementar métricas personalizadas e fluxos de consulta
+Como precisamos avaliar o recall por produto e, em seguida, agregar todos os produtos, optaremos pela segunda abordagem
+Cada nó no gráfico Pipeline representa uma classe que recebe algumas entradas e produz algumas saídas por meio de uma função de execução:class PipelineNode:Aqui kwargs corresponde às saídas do nó anterior no gráfico, que é manipulado em run para retornar uma tupla das saídas para o próximo nó, juntamente com um nome para a aresta de saída
+O único outro requisito é incluir um atributo output_edge que indique o número de saídas do nó (na maioria dos casos, output_edge=1, a menos que você tenha ramificações no pipeline que roteiam as entradas de acordo com algum critério)
+No nosso caso, precisamos de um nó para avaliar o Retriever, então usaremos a classe EvalRetriever cuja função run acompanha quais documentos têm respostas que correspondem à verdade básica
+Com esta classe, podemos construir um gráfico Pipeline adicionando o nó de avaliação após um nó que representa o próprio Recuperador: Observe que cada nó recebe um nome e uma lista de entradas
+Na maioria dos casos, cada nó tem uma única aresta de saída, então só precisamos incluir o nome do nó anterior nas entradas
+Agora que temos nosso pipeline de avaliação, precisamos passar algumas consultas e suas respostas correspondentes
+Para fazer isso, adicionaremos as respostas a um índice de rótulos dedicado em nosso repositório de documentos
+Haystack fornece um objeto Label que representa os intervalos de resposta e seus metadados de maneira padronizada
+Para preencher o índice de rótulos, primeiro criaremos uma lista de objetos Labels fazendo um loop sobre cada pergunta no conjunto de teste e extraindo as respostas correspondentes e os metadados adicionais: campo de origem que contém o ID exclusivo da pergunta para que possamos filtrar o armazenamento de documentos por pergunta
+Também adicionamos o ID do produto ao campo model_id para que possamos filtrar os rótulos por produto
+Agora que temos nossos rótulos, podemos escrevê-los no índice de rótulos no Elasticsearch da seguinte forma: Em seguida, precisamos criar um mapeamento entre nossos IDs de pergunta e as respostas correspondentes que podemos passar para o pipeline
+Para obter todos os rótulos, podemos usar a função get_all_labels_aggregated do documentstore que agregará todos os pares de perguntas e respostas associados a um ID exclusivo
+Essa função retorna uma lista de objetos MultiLabel, mas, em nosso caso, obtemos apenas um elemento, já que estamos filtrando por ID de pergunta, para que possamos construir uma lista de rótulos agregados da seguinte forma: Olhando para um desses rótulos, podemos ver que todos as respostas associadas a uma determinada pergunta são agregadas em um campo multiple_answers:labels_agg[14]Como em breve avaliaremos o Retriever e o Reader na mesma execução, precisamos fornecer os rótulos dourados para ambos os componentes no Pipeline
+executar função
+A maneira mais simples de conseguir isso é criar um dicionário que mapeie o ID de pergunta exclusivo com um dicionário de rótulos, um para cada componente: qid2label = {l
+origin: {"retriever": l, "reader": l} for l in labels_agg}Agora temos todos os ingredientes para avaliar o Retriever, então vamos definir uma função que alimente cada par de perguntas e respostas associado a cada produto para o pipeline de avaliação e rastreia as recuperações corretas em nosso pipeobject:Ótimo, funciona! Observe que escolhemos um valor específico para top_k_retriever para especificar o número de documentos a serem recuperados
+Em geral, aumentar esse parâmetro melhorará a rechamada, mas à custa de fornecer mais documentos ao Leitor e diminuir a velocidade do pipeline de ponta a ponta
+Para guiar nossa decisão sobre qual valor escolher, criaremos uma função que percorre vários valores de k e calcula a rechamada em todo o conjunto de teste para cada k: Se plotarmos os resultados, podemos ver como a rechamada melhora à medida que aumentamos k : em média, cada produto tem três avaliações, portanto, retornar cinco ou mais documentos significa que provavelmente obteremos o contexto correto
+Recuperação de passagem densa Vimos que obtemos uma recuperação quase perfeita quando nosso Recuperador esparso retorna k = 10 documentos, mas podemos fazer melhor com valores menores de k? A vantagem de fazer isso é que podemos passar menos documentos para o Leitor e, assim, reduzir a latência geral do nosso pipeline de controle de qualidade
+Uma limitação bem conhecida de Retrievers esparsos como o BM25 é que eles podem não conseguir capturar os documentos relevantes se a consulta do usuário contiver termos que não correspondam exatamente aos da revisão.
+Uma alternativa promissora é usar embeddings densos para representar a questão e documentar e o atual estado da arte é uma arquitetura conhecida como Dense Passage Retrieval (DPR)
+12 A ideia principal por trás do DPR é usar dois modelos BERT como codificadores E (⋅) e E (⋅) para a pergunta e passagem
+Conforme ilustrado na Figura 4-10, esses codificadores mapeiam o texto de entrada em uma representação vetorial d-dimensional do token [CLS]
+Figura 4-10
+Arquitetura bi-codificadora do DPR para calcular a relevância de um documento e consulta
+No Haystack, podemos inicializar um Retriever para DPR da mesma forma que fizemos para o BM25
+Além de especificar o armazenamento de documentos, também precisamos escolher os codificadores BERT para a pergunta e a passagem
+Esses codificadores são treinados dando-lhes perguntas com passagens relevantes (positivas) e passagens irrelevantes (negativas), onde o objetivo é aprender que pares de perguntas-passagens relevantes têm uma similaridade maior
+Para nosso caso de uso, usaremos codificadores que foram ajustados no corpus NQ desta maneira: Aqui também definimos embed_title=False desde a concatenação do título do documento (i
+e
+item_id) não fornece nenhuma informação adicional porque filtramos por produto
+Depois de inicializar o Retriever denso, a próxima etapa é iterar sobre todos os documentos indexados em nosso índice Elasticseach e aplicar os codificadores para atualizar a representação de incorporação
+Isso pode ser feito da seguinte maneira:document_store
+update_embeddings(retriever=dpr_retriever)Agora estamos prontos! Podemos avaliar o Retriever denso da mesma forma que fizemos para o BM25 e comparar a rechamada topk:Aqui podemos ver que o DPR não fornece um aumento na rechamada A pesquisa por similaridade dos embeddings pode ser acelerada usando a biblioteca FAISS do Facebook como a loja de documentos
+Da mesma forma, o desempenho do DPR Retriever pode ser melhorado com o ajuste fino no domínio de destino
+Agora que exploramos a avaliação do Retriever, vamos avaliar o Reader
+Avaliando o Reader No controle de qualidade extrativo, há duas métricas principais usadas para avaliar os Readers: pontuação Encontramos essa métrica no Capítulo 2 e ela mede a média harmônica da precisão e da rechamada
+Vamos ver como essas métricas funcionam importando algumas funções auxiliares do FARM e aplicando-as a um exemplo simples: from farm
+avaliação
+squad_evaluation import compute_f1, compute_exactDebaixo do capô, essas funções primeiro normalizam a previsão e o rótulo removendo a pontuação, corrigindo o espaço em branco e convertendo para letras minúsculas
+As strings normalizadas são então tokenizadas como um saco de palavras, antes de finalmente computar a métrica no nível do token
+A partir deste exemplo simples, podemos ver que o EM é uma métrica muito mais rigorosa do que a pontuação F1: adicionar um único token à previsão fornece um EM de zero
+Por outro lado, o F1score pode falhar em detectar respostas verdadeiramente incorretas
+Por exemplo, suponha que nosso intervalo de resposta previsto seja “cerca de 6.000, portanto, confiar apenas na pontuação F1 é enganoso, e rastrear ambas as métricas é uma boa estratégia para equilibrar a compensação entre subestimar (EM) e superestimar (pontuação F1) o desempenho do modelo
+Agora, em geral, há várias respostas válidas por pergunta, portanto, essas métricas são calculadas para cada par de perguntas e respostas no conjunto de avaliação e a melhor pontuação é selecionada entre todas as respostas possíveis
+As pontuações gerais de EM e F para o modelo são obtidas pela média das pontuações individuais de cada par de pergunta-resposta
+Para avaliar o Reader vamos criar um novo pipeline com dois nós: um nó Reader e um nó para avaliar theReader
+Usaremos a classe EvalReader que obtém as previsões do Reader e calcula as pontuações EM e F correspondentes
+Para comparar com a avaliação do SQuAD, pegaremos as melhores respostas para cada consulta com as métricas top_1_em e top_1_f1 armazenadas no EvalReader: Observe que especificamos skip_incorrect_retrieval=False; isso é necessário para garantir que o Recuperador sempre passe o contexto para o Leitor (como feito na avaliação SQuAD)
+Agora que analisamos todas as perguntas do leitor, vamos imprimir as pontuações: Ok, parece que o modelo ajustado tem um desempenho significativamente pior no SubjQA do que no SQuAD 2
+0, onde o MiniLM atinge uma pontuação EM e F de 76
+1 e 79
+5 respectivamente
+Uma razão para a queda de desempenho é que as avaliações de clientes são um domínio bem diferente da Wikipedia (onde SQuAD 2
+0 é gerado a partir), e a linguagem geralmente é bastante informal
+Outra razão é provavelmente devido à subjetividade inerente de nosso conjunto de dados, onde tanto as perguntas quanto as respostas diferem das informações factuais contidas na Wikipédia.
+Vamos dar uma olhada em como podemos ajustar esses modelos em um conjunto de dados para obter melhores resultados com a adaptação de domínio
+Adaptação de domínio Embora os modelos que são ajustados no SQuAD geralmente generalizem bem para outros domínios, vimos que para SubjQA as pontuações EM e F são mais da metade em comparação com o conjunto de validação SQuAD
+Essa falha em generalizar também foi observada em outros conjuntos de dados extrativos de controle de qualidade 13 e é entendida como evidência de que os modelos de transformadores são particularmente adeptos do superajuste ao SQuAD
+A maneira mais direta de melhorar o Reader é ajustando ainda mais nosso modelo MiniLM no conjunto de treinamento SubjQA
+O FARMReader possui um método de treinamento projetado para esse fim e espera que os dados estejam no formato SQuAD JSON, onde todos os pares de perguntas-respostas são agrupados para cada item, conforme ilustrado na Figura 4-11
+Figura 4-11
+Visualização do formato SQuAD JSON
+Você pode baixar os dados pré-processados ​​do repositório GitHub do livro ADD LINK
+Agora que temos as divisões no formato correto, vamos ajustar nosso Reader especificando a localização das divisões train e dev, juntamente com a localização de onde salvar o modelo ajustado: Uau, a adaptação de domínio aumentou nossa pontuação EM em um fator de seis e mais que dobrou a pontuação F! No entanto, você pode perguntar por que não ajustamos um modelo de linguagem pré-treinado diretamente no conjunto de treinamento SubjQA? Uma resposta é que temos apenas 1.295 exemplos de treinamento no SubjQA, enquanto o SQuAD tem mais de 100.000, então podemos enfrentar desafios com overfitting
+No entanto, vamos dar uma olhada no que o ajuste fino ingênuo produz
+Para uma comparação justa, usaremos o mesmo modelo de linguagem usado para ajustar nossa linha de base no SQuAD
+Como antes, carregaremos o modelo com o FARMReader: AVISO Ao lidar com pequenos conjuntos de dados, é melhor usar validação cruzada ao avaliar transformadores, pois eles podem ser propensos a superajuste
+Você pode encontrar um exemplo de como executar a validação cruzada com conjuntos de dados formatados em SQuAD no repositório FARM
+Avaliando todo o pipeline de controle de qualidade Agora que vimos como avaliar os componentes Reader e Retriever individualmente, vamos juntá-los para medir o desempenho geral de nosso pipeline
+Para fazer isso, precisaremos aumentar nosso pipeline Retriever com nós para o Reader e sua avaliação
+Vimos que obtemos uma recuperação quase perfeita em k = 10, então podemos corrigir esse valor e avaliar o impacto que isso tem no desempenho do Reader (já que agora ele receberá vários contextos por consulta em comparação com a avaliação no estilo SQuAD)
+Podemos, então, comparar as pontuações de EM e F de top 1 e top 3 para o modelo para prever uma resposta nos documentos retornados pelo Retriever: Figura 4-12
+Comparação das pontuações EM e F1 do Reader com todo o pipeline de controle de qualidade A partir deste gráfico, podemos ver o efeito que o Retriever tem no desempenho geral
+Em particular, há uma degradação geral do desempenho em comparação com a correspondência dos pares de contexto-questão, como é feito na avaliação do estilo SQuAD
+Isso pode ser contornado aumentando o número de respostas possíveis que o Reader pode prever
+Até agora só extraímos respostas do contexto, mas em geral pode ser que partes da resposta estejam espalhadas por todo o documento e gostaríamos que nosso modelo sintetizasse esses fragmentos em uma resposta única e coerente
+Vamos dar uma olhada em como podemos usar QA generativo para ter sucesso nesta tarefa
+Indo além do controle de qualidade extrativo Uma alternativa interessante para extrair respostas como extensões de texto em um documento é gerá-las com um modelo de linguagem pré-treinado
+Essa abordagem costuma ser chamada de QA abstrativo ou generativo e tem o potencial de produzir respostas mais bem formuladas que sintetizam evidências em várias passagens
+Embora menos maduro do que o controle de qualidade extrativo, este é um campo de pesquisa em rápido movimento, então é provável que essas abordagens sejam amplamente adotadas na indústria no momento em que você estiver lendo isso! Nesta seção abordaremos brevemente o estado da arte atual: Recuperação Geração Aumentada (RAG)
+14Retrieval Augmented Generation RAG estende a clássica arquitetura Retriever-Reader que vimos neste capítulo, trocando o Reader por Generator e usando o DPR como o Retriever
+O Gerador é um transformador de sequência a sequência pré-treinado, como T5 ou BART, que recebe vetores latentes de documentos do DPR e, em seguida, gera iterativamente uma resposta com base na consulta e nesses documentos
+Como o DPR e o Gerador são diferenciáveis, todo o processo pode ser ajustado de ponta a ponta, conforme ilustrado na Figura 4-13
+Você pode encontrar uma demonstração interativa do RAG no site Hugging Face
+Figura 4-13
+A arquitetura RAG para ajustar um Retriever e Generator de ponta a ponta (cortesia de Ethan Perez)
+Para mostrar o RAG em ação, usaremos o DPRetriever anterior, então só precisamos instanciar um Generator
+Existem dois tipos de modelos RAG para escolher: RAG-Sequence Usa o mesmo documento recuperado para gerar a resposta completa
+Em particular, os k documentos principais do Retriever são alimentados ao Gerador, que produz uma sequência de saída para cada documento, e o resultado é marginalizado para obter a melhor resposta
+RAG-TokenPode usar um documento diferente para gerar cada token na resposta
+Isso permite que o Gerador sintetize evidências de vários documentos
+Como os modelos RAG-Token tendem a ter um desempenho melhor do que os RAG-Sequence, usaremos o modelo de token que foi ajustado no NQ como nosso Gerador
+Instanciar um Generator no Haystack é semelhante ao Reader, mas ao invés de especificar os parâmetros max_seq_length e doc_stride para uma janela deslizante sobre os contextos, especificamos hiperparâmetros que controlam a geração do texto: Aqui max_length e min_length controlam o comprimento das respostas geradas, enquanto num_beams especifica o número de feixes para usar na busca de feixe (a geração de texto é abordada detalhadamente no Capítulo 8)
+Como fizemos com o DPR Retriever, não incorporamos os títulos dos documentos, pois nosso corpus é sempre filtrado por ID do produto
+A próxima coisa a fazer é unir o Retriever e o Generator usando o GenerativeQAPipeline do Haystack:from haystack
+pipeline import GenerativeQAPipelinepipe = GenerativeQAPipeline(generator=generator, retriever=dpr_retriever)NOTEIn RAG, o codificador de consulta e o gerador são treinados de ponta a ponta, enquanto o codificador de contexto é congelado
+No Haystack, o GenerativeQAPipeline usa o codificador de consulta do RAGenerator e o codificador de contexto do DensePassageRetriever
+Vamos agora dar uma olhada no RAG, alimentando algumas perguntas sobre o tablet Amazon Fire de antes
+Para simplificar a consulta, vamos escrever uma função simples que receba a consulta e imprima as principais respostas: Hmm, esse resultado é um pouco decepcionante e sugere que a natureza subjetiva da pergunta está confundindo o Gerador
+Vamos tentar com algo um pouco mais factual:generate_answers("Qual é a principal desvantagem?")Pergunta: Qual é a principal desvantagem?Ok, isso é mais sensato! Para obter melhores resultados, podemos ajustar o RAG de ponta a ponta no SubjQA e, se você estiver interessado em explorar isso, há scripts no repositório Transformers para ajudá-lo a começar
+ConclusãoBem, esse foi um passeio rápido pelo controle de qualidade e você provavelmente tem muito mais perguntas que gostaria de ver respondidas (punitivo!)
+Discutimos duas abordagens para QA (extrativa e generativa) e examinamos dois algoritmos de recuperação diferentes (BM25 e DPR)
+Ao longo do caminho, vimos que a adaptação de domínio pode ser uma técnica simples para aumentar o desempenho de nosso sistema de QA por uma margem significativa e examinamos algumas das métricas mais comuns usadas para avaliar esses sistemas
+Embora tenhamos nos concentrado no controle de qualidade de domínio fechado (i
+e
+um único domínio de produtos eletrônicos), as técnicas neste capítulo podem ser facilmente generalizadas para o caso de domínio aberto e recomendamos a leitura da excelente série Fast Forward QA da Cloudera para ver o que está envolvido
+A implantação de sistemas de controle de qualidade em estado selvagem pode ser um negócio complicado de acertar, e nossa experiência é que uma parte significativa do valor vem primeiro do fornecimento aos usuários finais de recursos de pesquisa úteis, seguidos por um componente extrativo
+A esse respeito, o Reader pode ser usado de maneiras inovadoras, além de responder a consultas de usuários sob demanda
+Por exemplo, Grid Dynamics foi capaz de usar seu Reader para extrair automaticamente um conjunto de prós e contras para cada produto no catálogo de seus clientes
+Da mesma forma, eles mostram que um Reader também pode ser usado para extrair entidades nomeadas de maneira instantânea, criando consultas como “Que tipo de câmera?”
+Dada a sua infância e sutis modos de falha, recomendamos explorar a geração de respostas apenas quando as outras duas abordagens forem esgotadas
+Essa "hierarquia de necessidades" para lidar com problemas de controle de qualidade é ilustrada na Figura 4-14
+Figura 4-14
+A hierarquia de necessidades de controle de qualidade
+Olhando para o futuro, uma área de pesquisa interessante para ficar de olho é o controle de qualidade multimodal, que envolve o controle de qualidade em várias modalidades, como texto, tabelas e imagens
+Conforme descrito no benchmark MultiModalQA 15, tais sistemas podem potencialmente permitir que os usuários respondam a perguntas complexas como “Quando foi concluída a famosa pintura com dois dedos que se tocam?” que integram informações em diferentes modalidades
+Outra área com aplicações práticas de negócios é o controle de qualidade sobre um grafo de conhecimento, onde os nós do grafo correspondem a entidades do mundo real e suas relações são definidas pelas arestas
+Ao codificar factóides como triplos (sujeito, predicado, objeto), pode-se usar o gráfico para responder a perguntas sobre um dos elementos ausentes
+Você pode encontrar um exemplo que combina transformadores com gráficos de conhecimento nos tutoriais do Haystack
+Uma última direção promissora é a “geração automática de perguntas” como uma forma de fazer algum tipo de treinamento não supervisionado/fracamente supervisionado a partir de dados não rotulados ou aumento de dados
+Dois exemplos recentes de artigos sobre isso incluem o benchmark16 de perguntas provavelmente respondidas (PAQ) e o aumento de dados sintéticos17 para configurações multilíngues
+Neste capítulo, vimos que, para usar modelos de QA com sucesso em casos de uso do mundo real, precisamos aplicar alguns truques, como um pipeline de recuperação rápida para fazer previsões quase em tempo real
+Ainda assim, aplicar um modelo de controle de qualidade a um punhado de documentos pré-selecionados pode levar alguns segundos no hardware de produção
+Embora isso não pareça muito, imagine como sua experiência seria diferente se você tivesse que esperar alguns segundos para obter os resultados de sua pesquisa no Google
+Alguns segundos de tempo de espera podem decidir o destino de sua aplicação alimentada por transformador e, no próximo capítulo, veremos alguns métodos para acelerar ainda mais as previsões do modelo
+1 Nesse caso particular, não responder pode ser a escolha certa, pois a resposta depende de quando a pergunta é feita e se trata de uma pandemia global em que ter informações de saúde precisas é essencial
+2 SUBJQA: um conjunto de dados para subjetividade e compreensão da revisão, J
+Bjerva e outros
+(2020)3 Como veremos em breve, também existem perguntas sem resposta que são projetadas para produzir modelos de compreensão de leitura mais robustos
+4 SQUAD: Mais de 100.000 perguntas para compreensão de texto por máquina, P
+Rajpurkar e outros
+(2016)5 MINILM: Destilação profunda de auto-atenção para compressão independente de tarefas de transformadores pré-treinados, W
+Wang et al (2020)6 Observe que os token_type_ids não estão presentes em todos os modelos de transformador
+No caso de modelos do tipo BERT, como MiniLM, thetoken_type_ids também são usados ​​durante o pré-treinamento para incorporar a tarefa de previsão da próxima frase
+7 Consulte o Capítulo 2 para obter detalhes sobre como esses estados ocultos podem ser extraídos
+8 Saiba o que você não sabe: perguntas sem resposta para SQUAD, P
+Rajpurkar, R
+Jia e P
+Liang (2018)9 Perguntas naturais: uma referência para pesquisa de resposta a perguntas, T
+Kwiatkowski et al (2019)10 O guia também fornece instruções de instalação para mac OS e Windows
+11 Para obter uma explicação detalhada sobre pontuação de documentos com TF-IDF e BM25, consulte o Capítulo 23 de Speech and Language Processing, D
+Jurafsky e J
+H
+Martin (2020) 12 Recuperação de passagem densa para resposta a perguntas de domínio aberto, V
+Karpukhin et al (2020)13 Aprendendo e avaliando a inteligência linguística geral D
+Yogatama e outros
+(2019) 14 Geração Aumentada de Recuperação para Tarefas de NLP Intensivas em Conhecimento, P
+Lewis et al (2020)15 MultiModalQA: Resposta a perguntas complexas sobre texto, tabelas e imagens, A
+Talmor et al (2021)16 PAQ: 65 milhões de perguntas provavelmente feitas e o que você pode fazer com elas, P
+Lewis e outros (2021)
+17 Aumento de Dados Sintéticos para Resposta a Perguntas Cross-Linguais Zero-Shot, A
+Riabi e outros (2020)

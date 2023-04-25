@@ -1,0 +1,90 @@
+Capítulo 8
+Geração de texto UMA OBSERVAÇÃO PARA LEITORES DE LANÇAMENTO ANTERIOR Com os e-books de lançamento antecipado, você obtém os livros em sua forma mais antiga - o conteúdo bruto e não editado do autor enquanto eles escrevem - para que você possa aproveitar essas tecnologias muito antes do lançamento oficial desses títulos
+Este será o 8º capítulo do último livro
+Observe que o repositório do GitHub será ativado mais tarde
+Se você tiver comentários sobre como podemos melhorar o conteúdo e/ou os exemplos deste livro, ou se notar falta de material neste capítulo, entre em contato com o editor em mpotter@oreilly
+com
+Um dos recursos mais estranhos dos modelos de linguagem baseados no Transformer é sua capacidade de gerar texto que é quase indistinguível do texto escrito por humanos
+Um exemplo famoso é o GPT-2,1 da OpenAI que, quando solicitado: Em uma descoberta chocante, um cientista descobriu uma manada de unicórnios vivendo em um vale remoto e inexplorado na Cordilheira dos Andes.
+Ainda mais surpreendente para os pesquisadores foi o fato de que os unicórnios falavam inglês perfeitamente.
+foi capaz de gerar um artigo de notícias atraente sobre unicórnios falantes:
+Esses unicórnios branco-prateados de quatro chifres eram desconhecidos da ciência
+Agora, depois de quase dois séculos, o mistério do que desencadeou esse estranho fenômeno foi finalmente resolvido.
+Dr.
+Jorge Pérez, biólogo evolutivo da Universidade de La Paz, e vários companheiros, estavam explorando a Cordilheira dos Andes quando encontraram um pequeno vale, sem outros animais ou humanos
+Pérez notou que o vale tinha o que parecia ser uma fonte natural, cercada por dois picos de rocha e neve prateada.
+Pérez e os outros então se aventuraram ainda mais no vale
+“Quando chegamos ao topo de um pico, a água parecia azul, com alguns cristais no topo”, disse Pérez
+Pérez e seus amigos ficaram surpresos ao ver o pastor de unicórnios
+Essas criaturas podiam ser vistas do ar sem ter que se mover muito para vê-las - elas estavam tão próximas que podiam tocar seus chifres
+Ao examinar essas criaturas bizarras, os cientistas descobriram que as criaturas também falavam um inglês razoavelmente regular... O que torna esse exemplo tão notável é que ele foi gerado sem nenhuma supervisão explícita! Simplesmente aprendendo a prever a próxima palavra em milhões de páginas da web, o GPT-2 e seus descendentes mais poderosos, como o GPT-32, são capazes de adquirir um amplo conjunto de habilidades e habilidades de reconhecimento de padrões que podem ser ativadas com diferentes tipos de prompts de entrada.
+A Figura 8-1 mostra como os modelos de linguagem às vezes são expostos a sequências de subtarefas como adição, desembaralhamento de palavras e tradução durante o pré-treinamento, o que lhes permite transferir esse conhecimento de forma eficaz durante o ajuste fino ou (se o modelo for grande o suficiente) tempo de inferência
+Essas subtarefas não são escolhidas com antecedência, mas ocorrem naturalmente nos enormes corpora usados ​​para treinar modelos de linguagem de bilhões de parâmetros
+Figura 8-1
+Durante o pré-treinamento, os modelos de linguagem são expostos a sequências de subtarefas que podem ser adaptadas durante a inferência (cortesia de Tom B
+Marrom)
+Essa capacidade dos Transformers de gerar texto realista produziu uma gama diversificada de aplicativos como Talk To Transformer, Write With Transformer, AI Dungeon e agentes de conversação como o Meena do Google, que podem até contar piadas cafonas (Figura 8-2)! Figura 8-2
+Meena (à esquerda) contando uma piada cafona para um humano (à direita) (cortesia de Daniel Adiwardana e Thang Luong) pode ser aplicado a uma das tarefas mais desafiadoras em PNL: gerar resumos precisos de documentos de texto longo, como artigos de notícias ou relatórios de negócios
+O desafio de gerar texto coerente Neste livro, focamos em lidar com tarefas de PNL por meio de uma combinação de pré-treinamento e ajuste fino supervisionado.
+Para cabeçalhos específicos de tarefas, como sequência ou classificação de token, gerar previsões era bastante direto; o modelo produziu alguns logits e nós pegamos o valor máximo para obter a classe prevista ou aplicamos uma função softmax para obter as probabilidades previstas por classe
+Por outro lado, converter a saída probabilística do modelo em texto requer um método de decodificação que apresenta alguns desafios exclusivos da geração de texto:
+A qualidade e diversidade do texto gerado depende da escolha do método de decodificação e dos hiperparâmetros associados
+Para entender como funciona esse processo de decodificação, vamos começar examinando como o GPT-2 é pré-treinado e posteriormente aplicado para gerar texto
+Como outros modelos autoregressivos ou de linguagem causal, o GPT-2 é pré-treinado para estimar a probabilidade P (y , y ,
+
+
+, y |x) de uma sequência de tokens y , y ,
+
+
+y ocorrendo no texto, dado algum prompt inicial ou sequência de contexto x
+Como é impraticável adquirir dados de treinamento suficientes para estimar P (y|x) diretamente, é comum usar a regra da cadeia de probabilidade para fatorá-la como um produto de probabilidades condicionais, onde y é uma notação abreviada para a sequência y,
+
+
+, você
+É a partir dessas probabilidades condicionais que extraímos a intuição de que a modelagem autorregressiva da linguagem equivale a predizer cada palavra dadas as palavras precedentes em uma sentença; isso é exatamente o que a probabilidade no lado direito da equação anterior descreve
+Observe que esse objetivo de pré-treinamento é bem diferente do BERT, que utiliza contextos passados ​​e futuros para prever um token mascarado
+Conforme mostrado na Figura 8-3, para evitar que as cabeças de atenção espiem tokens futuros, o GPT-2 aplica uma máscara à frase de entrada para que os tokens à direita da posição atual fiquem ocultos
+Figura 8-3
+Diferença entre os mecanismos de auto-atenção de BERT (esquerda) e GPT-2 (direita) para três incorporações de token
+No caso do BERT, cada incorporação de token pode atender a todas as outras incorporações
+No caso GPT-2, as incorporações de token podem atender apenas às incorporações anteriores na sequência
+Até agora você deve ter adivinhado como podemos adaptar essa tarefa de previsão do próximo token para gerar sequências de texto de tamanho arbitrário
+Conforme mostrado na Figura 8-4, começamos com um prompt como “Transformers are the” e usamos o modelo para prever o próximo token
+Depois de determinar o próximo token, nós o anexamos ao prompt e usamos a nova sequência de entrada para gerar outro token
+Fazemos isso até atingirmos um token especial de fim de sequência (EOS) ou um comprimento máximo predefinido
+Figura 8-4
+Gerando texto a partir de uma sequência de entrada adicionando uma nova palavra à entrada em cada etapa
+NOTAComo a sequência de saída é condicionada à escolha do prompt de entrada, esse tipo de geração de texto é geralmente chamado de geração de texto condicional
+No centro desse processo está um método de decodificação que determina qual token é selecionado em cada intervalo de tempo
+Como o cabeçalho do modelo de linguagem produz um logit z por token no vocabulário em cada etapa, podemos obter a distribuição de probabilidade sobre o próximo token possível w tomando o softmax: O objetivo da maioria dos métodos de decodificação é procurar a sequência geral mais provável escolhendo um ŷ tal que Como não existe um algoritmo que possa encontrar a sequência decodificada ótima em tempo polinomial, contamos com aproximações
+Nesta seção, exploraremos algumas dessas aproximações e gradualmente desenvolveremos algoritmos mais inteligentes e complexos que podem ser usados ​​para gerar textos de alta qualidade
+Decodificação de pesquisa gananciosa O método de decodificação mais simples para obter tokens discretos da saída contínua de um modelo é selecionar cuidadosamente o token com a maior probabilidade em cada passo de tempo: Para ver como a pesquisa gananciosa funciona, vamos começar carregando o 1
+Versão de 5 bilhões de parâmetros do GPT-2 com um cabeçote de modelagem de linguagem:Agora vamos gerar algum texto! Embora o Transformers forneça uma função de geração para modelos autorregressivos como GPT-2, vamos implementar esse método de decodificação nós mesmos para ver o que acontece sob o capô
+Para aquecer, usaremos a mesma abordagem iterativa mostrada na Figura 84 e usaremos “Transformers are the” como prompt de entrada e executaremos a decodificação para oito intervalos de tempo
+A cada passo de tempo, escolhemos os logits do modelo para o último token no prompt e os agrupamos com um softmax para obter uma distribuição de probabilidade
+Em seguida, escolhemos o próximo token com a probabilidade mais alta, adicionamos à sequência de entrada e executamos o processo novamente
+O código a seguir faz o trabalho e também armazena os cinco tokens mais prováveis ​​em cada passo de tempo para que possamos visualizar as alternativas: brandline Transformers são a linha de brinquedos mais popular de todos os tempos Transformers são a linha de brinquedos mais popular da história América Japão Norte Transformers são a linha de brinquedos mais popular do mundo História dos Estados Unidos U Transformers são a linha de brinquedos mais popular do mundo e com este método simples, conseguimos gerar a frase perfeitamente razoável “Transformers são o brinquedo mais popular linha no mundo” no prompt de entrada
+Também podemos ver explicitamente a natureza iterativa da geração de texto; ao contrário de outras tarefas, como classificação de sequência ou resposta a perguntas, em que um único avanço é suficiente para gerar as previsões, com a geração de texto, precisamos decodificar os tokens de saída um de cada vez
+A implementação da pesquisa gulosa não foi muito difícil, mas queremos usar a função de geração integrada do Transformers para explorar métodos de decodificação mais sofisticados
+Para reproduzir nosso exemplo simples, vamos garantir que a amostragem esteja desativada (está desativada por padrão, a menos que a configuração específica do modelo do qual você está carregando o ponto de verificação indique o contrário) e especifique o max_length para onze tokens, pois nosso prompt já possui três palavras: Agora vamos tentar algo um pouco mais interessante: podemos reproduzir a história do unicórnio da OpenAI? Como fizemos acima, codificaremos o prompt com o tokenizador e especificaremos um valor maior para max_length para gerar uma sequência de texto mais longa: uma descoberta chocante, um cientista descobriu uma manada de unicórnios vivendo em um vale remoto e inexplorado na Cordilheira dos Andes
+Ainda mais surpreendente para os pesquisadores foi o fato de que os unicórnios falavam inglês perfeitamente.
+Os pesquisadores, da Universidade da Califórnia, em Davis, e da Universidade do Colorado, em Boulder, estavam realizando um estudo sobre a floresta nublada andina, que abriga espécies raras de árvores da floresta nublada.
+Os pesquisadores ficaram surpresos ao descobrir que os unicórnios eram capazes de se comunicar uns com os outros e até mesmo com humanos.
+Os pesquisadores ficaram surpresos ao descobrir que os unicórnios eram capazes. Bem, as primeiras frases são bem diferentes do exemplo da OpenAI e, curiosamente, envolvem universidades diferentes sendo creditadas com a descoberta! Também podemos ver uma das principais desvantagens da decodificação de pesquisa gulosa: ela tende a produzir sequências de saída repetitivas, o que certamente é indesejável em um artigo de notícias
+Este é um problema comum com algoritmos de busca gananciosos que podem falhar em fornecer a solução ideal; no contexto da decodificação, pode perder sequências de palavras cuja probabilidade geral é maior apenas porque palavras de alta probabilidade são precedidas por palavras de baixa probabilidade
+Felizmente, podemos fazer melhor - vamos examinar um método popular conhecido como beam searchdecoding
+NOTA Embora a decodificação de pesquisa gulosa raramente seja usada para tarefas de geração de texto que requerem diversidade, ela pode ser útil para produzir sequências curtas como aritmética, em que uma saída determinística e factualmente correta é preferida
+3 Para essas tarefas, você pode condicionar o GPT-2 fornecendo alguns exemplos separados por linha no formato "" como prompt de entrada
+Decodificação de pesquisa de feixe Em vez de decodificar o token com a maior probabilidade em cada etapa, a pesquisa de feixe rastreia os próximos tokens mais prováveis ​​do topo b, em que b é referido como o número de feixes ou hipóteses parciais
+O próximo conjunto de vigas é escolhido considerando todas as possíveis extensões do próximo token do conjunto existente e selecionando as b extensões mais prováveis
+O processo é repetido até atingirmos o comprimento máximo ou um token EOS, e a sequência mais provável é selecionada classificando os b feixes de acordo com suas probabilidades logarítmicas
+Um exemplo de busca de feixe é representado na Figura 8-5
+Figura 8-5
+Pesquisa de feixe com 2 feixes
+As sequências mais prováveis ​​em cada timestep são destacadas em azul
+Por que pontuamos as sequências usando log-probabilidades em vez das próprias probabilidades? Uma razão é que o cálculo da probabilidade geral de uma sequência P (y , y ,
+
+
+, y |x) envolve o cálculo de um produto de probabilidades condicionais P (y |y , x)
+Como cada probabilidade condicional é tipicamente um pequeno número no intervalo [0, 1], seu produto pode levar a uma probabilidade geral que pode facilmente transbordar
+Por exemplo, suponha que temos uma sequência de t = 1024tokens e assuma generosamente que a probabilidade de cada token é 0

@@ -1,0 +1,505 @@
+Capítulo 10
+Training Transformers from Scratch UMA OBSERVAÇÃO PARA LEITORES DE LANÇAMENTO ANTERIOR Com os e-books de lançamento antecipado, você obtém os livros em sua forma mais antiga - o conteúdo bruto e não editado do autor enquanto eles escrevem - para que você possa aproveitar essas tecnologias muito antes do lançamento oficial desses títulos
+Este será o 10º capítulo do último livro
+Observe que o repositório do GitHub será ativado mais tarde
+Se você tiver comentários sobre como podemos melhorar o conteúdo e/ou os exemplos deste livro, ou se notar falta de material neste capítulo, entre em contato com o editor em mpotter@oreilly
+com
+No Capítulo 1, examinamos um aplicativo sofisticado chamado GitHub Copilot, que usa um transformador semelhante ao GPT para gerar código a partir de vários prompts
+Ferramentas como o Copilot permitem que os programadores escrevam código com mais eficiência, gerando grande parte do código clichê automaticamente ou detectando erros prováveis
+Mais tarde, no Capítulo 8, examinamos mais de perto os modelos do tipo GPT e como podemos usá-los para gerar texto de alta qualidade.
+Neste capítulo, completamos o círculo e construímos nosso próprio modelo de geração de código com base na arquitetura GPT! Como as linguagens de programação usam uma sintaxe e um vocabulário muito específicos que são distintos da linguagem natural, faz sentido treinar um novo modelo a partir do zero, em vez de ajustar um existente
+Até agora, trabalhamos principalmente em aplicativos com restrição de dados, em que a quantidade de dados de treinamento rotulados é limitada
+Nesses casos, a aprendizagem por transferência – na qual partimos de um modelo pré-treinado em um corpus muito maior – nos ajudou a construir modelos performáticos
+A abordagem de aprendizado por transferência atingiu o pico no Capítulo 7, onde quase não usamos nenhum dado de treinamento.
+Neste capítulo iremos para o outro extremo; o que podemos fazer quando estamos nos afogando em dados? Com essa pergunta, exploraremos a etapa de pré-treinamento em si e aprenderemos como treinar um transformador do zero
+Resolver esta tarefa nos mostrará aspectos do treinamento aos quais ainda não prestamos atenção: Coleta e manipulação de um conjunto de dados muito grande
+Criando um tokenizador personalizado para nosso conjunto de dados
+Como treinar um modelo em escala
+Para treinar com eficiência grandes modelos com bilhões de parâmetros, precisaremos de ferramentas especiais para treinamento distribuído e pipelining
+Felizmente, existe uma biblioteca chamada Hugging Face Accelerate, projetada precisamente para esses aplicativos! Vamos acabar abordando alguns dos maiores modelos de PNL hoje
+TODO adicionar imagem de aprendizado de transferência do capítulo 1 com foco no pré-treinamento?Grandes conjuntos de dados e onde encontrá-losExistem muitos domínios e tarefas em que você pode realmente ter uma grande quantidade de dados em mãos
+Eles variam de documentos legais a conjuntos de dados biomédicos e até bases de código de programação
+Na maioria dos casos, esses conjuntos de dados não são rotulados e seu grande tamanho significa que eles geralmente só podem ser rotulados por meio do uso de heurística ou usando metadados que são armazenados durante o processo de coleta
+Por exemplo, dado um corpus de funções Python, poderíamos separar as docstrings do código e tratá-las como os alvos que desejamos gerar em uma tarefa seqs2seq
+Um corpus muito grande pode ser útil mesmo quando não é rotulado ou apenas rotulado heuristicamente
+Vimos um exemplo disso no Capítulo 7, onde usamos a parte não rotulada de um conjunto de dados para ajustar um modelo de linguagem para adaptação de domínio, o que rendeu um ganho de desempenho especialmente no regime lowdata
+Aqui estão alguns exemplos de alto nível que ilustraremos na próxima seção: Se um objetivo de treinamento não supervisionado ou autossupervisionado semelhante à sua tarefa downstream puder ser projetado, você poderá treinar um modelo para sua tarefa sem rotular seu conjunto de dados
+Se heurísticas ou metadados puderem ser usados ​​para rotular o conjunto de dados em escala com rótulos relacionados à sua tarefa downstream, também é possível usar esse grande conjunto de dados para treinar um modelo útil para sua tarefa downstream em uma configuração supervisionada
+A decisão de treinar do zero, em vez de ajustar um modelo existente, é ditada principalmente pelo tamanho do corpus de ajuste fino e pelo domínio divergente entre os modelos pré-treinados disponíveis e o corpus
+Em particular, usar um modelo pré-treinado força você a usar o tokenizador associado a esse modelo pré-treinado
+Mas usar um tokenizer que é treinado em um corpus de outro domínio geralmente não é o ideal
+Por exemplo, usar o tokenizador pré-treinado da GPT em outro campo, como documentos legais, outros idiomas ou até sequências completamente diferentes, como notas musicais ou sequências de DNA, resultará em tokenização incorreta, como veremos em breve
+Como a quantidade de conjunto de dados de treinamento a que você tem acesso se aproxima da quantidade de dados usados ​​para o pré-treinamento, torna-se interessante considerar o treinamento do modelo e do tokenizador do zero
+Antes de discutirmos os diferentes objetivos de pré-treinamento, primeiro precisamos construir um grande corpus adequado para pré-treinamento que vem com seu próprio conjunto de desafios
+Desafios na construção de um corpus de grande escala A qualidade de um modelo após o pré-treinamento reflete em grande parte a qualidade do corpus de pré-treinamento, e o defeito no corpus de pré-treinamento será herdado pelo modelo
+Portanto, esta é uma boa ocasião para discutir alguns dos problemas e desafios comuns associados à construção de grandes corpora adequados para pré-treinamento antes de criar nosso próprio
+À medida que o conjunto de dados fica cada vez maior, diminuem as chances de que você possa controlar totalmente – ou pelo menos ter uma ideia precisa – do que está dentro do conjunto de dados.
+Um conjunto de dados muito grande provavelmente não foi criado por criadores dedicados que elaboram um exemplo de cada vez, enquanto estão cientes e familiarizados com o pipeline completo e a tarefa à qual o modelo de aprendizado de máquina será aplicado
+Em vez disso, é muito mais provável que um conjunto de dados muito grande tenha sido criado de maneira automática ou semiautomática, coletando dados gerados como efeito colateral de outras atividades; por exemplo, como dados enviados a uma empresa para uma tarefa que o usuário está executando, ou coletados na Internet de forma semiautomática
+Existem várias consequências importantes que decorrem do fato de que conjuntos de dados em larga escala são criados principalmente com um alto grau de automação.
+Há um controle limitado sobre o conteúdo e a maneira como são criados e, portanto, o risco de treinar um modelo com dados tendenciosos e de qualidade inferior aumenta
+Bons exemplos disso são investigações recentes em conjuntos de dados famosos de larga escala como BookCorpus1 ou C42, que foram usados ​​para treinar BERT e T5 respectivamente e são dois modelos que usamos em capítulos anteriores
+Essas investigações "após o fato" descobriram, entre outras coisas: Uma proporção significativa do corpus C4 é traduzida por máquina com métodos automáticos em vez de humanos
+3 O apagamento díspar do inglês afro-americano como resultado da filtragem de stopwords em C4 produziu uma sub-representação desse conteúdo
+Normalmente, é difícil em um corpus de texto grande encontrar um meio-termo entre (1) incluir (muitas vezes demais) conteúdo sexualmente explícito ou outro tipo de conteúdo explícito ou (2) apagar totalmente todas as menções à sexualidade ou gênero e, como consequência, qualquer discussão legítima em torno dessas perguntas
+Como consequência surpreendente disso, tokenizar uma palavra bastante comum como “sexo” com um significado neutro além de um explícito não é natural para um tokenizador treinado em C4, pois essa palavra está totalmente ausente do corpus e, portanto, completamente desconhecida
+Muitas ocorrências de violação de direitos autorais no BookCorpus e provavelmente em outros conjuntos de dados de grande escala também
+4O gênero se inclina para romances "romance" no BookCorpusEssas descobertas podem não ser incompatíveis com o uso posterior dos modelos treinados neste corpus
+Por exemplo, a forte super-representação de romances de “romance” no BookCorpus provavelmente é boa se o modelo for destinado a ser usado como uma ferramenta de escrita de romance (por exemplo, para ajudar a superar a angústia criativa) ou jogo
+Vamos ilustrar a noção de um modelo sendo distorcido pelos dados comparando gerações de texto do GPT que foi treinado em grande parte no BookCorpus e GPT-2 que foi treinado em páginas da web/blogs/notícias com links do Reddit
+Comparamos versões de tamanhos semelhantes de ambos os modelos no mesmo prompt para que a principal diferença seja o conjunto de dados de treinamento
+Usaremos o pipeline de geração de texto para investigar as saídas do modelo: Em seguida, vamos criar uma função simples para contar o número de parâmetros em cada modelo: Agora podemos gerar 3 conclusões diferentes de cada modelo, cada uma com o mesmo prompt de entrada:1
+Quando eles voltaram
+"precisamos de tudo o que conseguirmos", disse Jason assim que eles se acomodaram na traseira do caminhão sem que ninguém os parasse.
+" depois de chegar lá, caberá a nós o que encontrar
+por enquanto2
+Quando eles voltaram
+seu olhar varreu seu corpo
+ele a vestiu também, com as roupas emprestadas que ela usou para a viagem
+"Eu pensei que seria mais fácil deixar você lá
+" uma mulher like3
+Quando eles voltaram para casa e ela estava sentada lá com o menino
+"não tenha medo", ele disse a ela
+ela balançou a cabeça lentamente, com os olhos arregalados
+ela foi a única em tudo o que descobriu que tom sabia de seu erroApenas amostrando um punhado de saídas de ambos os modelos, já podemos ver a distintiva inclinação "romance" na geração GPT, que normalmente imaginará dois personagens do sexo oposto (uma mulher e um homem), e um diálogo com uma interação romântica entre eles
+Por outro lado, o GPT-2 foi treinado em texto da web vinculado a e de artigos do Reddit e adota principalmente um “eles” neutro em suas gerações que contêm elementos “semelhantes a blogs” ou relacionados a aventuras, como viagens
+Em geral, qualquer modelo treinado em um conjunto de dados refletirá o viés de linguagem e a super ou sub-representação de populações e eventos em seus dados de treinamento
+É importante levar em consideração esses vieses no comportamento do modelo em relação ao público-alvo que interage com o modelo
+Em nosso caso, nossa base de código de programação será composta principalmente de código em vez de linguagem natural, mas ainda podemos querer: Equilibrar a linguagem de programação que usamos
+Filtre amostras de código duplicadas ou de baixa qualidade
+Leve em consideração as informações de direitos autorais
+Investigue o idioma contido na documentação, comentários ou docstrings incluídos, por exemplo, para contabilizar dados de identificação pessoal
+Isso deve dar uma ideia dos difíceis desafios que você enfrenta ao criar grandes corpora de texto e indicamos ao leitor um artigo do Google que fornece uma estrutura para o desenvolvimento de conjuntos de dados
+Com isso em mente, vamos agora dar uma olhada na criação de nosso próprio conjunto de dados! Construindo um conjunto de dados de código personalizado Para simplificar um pouco a tarefa, focaremos na criação de um modelo de geração de código para a linguagem de programação Python (o GitHub Copilot oferece suporte a mais de uma dúzia de linguagens)
+A primeira coisa de que precisaremos em um grande corpo de pré-treinamento do código-fonte Python
+Felizmente existe um recurso natural que todo engenheiro conhece: o próprio GitHub! O famoso site de compartilhamento de código hospeda gigabytes de repositórios de código que são acessíveis abertamente e podem ser baixados e usados ​​de acordo com suas respectivas licenças
+No momento em que este livro foi escrito, o GitHub hospedava mais de 20 milhões de repositórios de código
+Muitos deles são repositórios pequenos ou de teste criados por usuários para aprendizado, projetos futuros ou fins de teste
+Isso leva a uma qualidade um tanto ruidosa desses repositórios
+Vejamos algumas estratégias para lidar com esses problemas de qualidade
+Filtrar o ruído ou não? Como qualquer pessoa pode criar um repositório GitHub, a qualidade dos projetos é muito ampla
+O GitHub permite que as pessoas marquem repositórios com "estrela", o que pode fornecer uma métrica de proxy para a qualidade do projeto, indicando que outros usuários estão interessados ​​em um repositório
+Outra forma de filtrar os repositórios pode ser selecionar projetos que são comprovadamente usados ​​em pelo menos um outro projeto
+Há alguma escolha consciente a ser feita aqui, relacionada a como queremos que o sistema funcione em um ambiente do mundo real
+Ter algum ruído no conjunto de dados de treinamento tornará nosso sistema mais robusto para entradas ruidosas no tempo de inferência, mas também tornará suas previsões mais aleatórias
+Dependendo do uso pretendido e da integração de todo o sistema, podemos optar por usar dados mais ou menos ruidosos e adicionar operações de pré e pós-filtragem
+Freqüentemente, ao invés de remover o ruído, uma solução interessante é modelar o ruído e encontrar uma maneira de poder fazer geração condicional com base na quantidade de ruído que queremos ter em nossa geração de modelo
+Por exemplo, aqui poderíamos:Recuperar informações (ruidosas) sobre a qualidade do código, por exemplo, com estrelas ou uso downstreamAdicionar essas informações como entrada ao nosso modelo durante o treinamento, por exemplo, no primeiro token de cada sequência de entradaNo momento da geração/inferência, escolha o token correspondente à qualidade que queremos (normalmente a qualidade máxima)
+Dessa forma, nosso modelo (1) será capaz de aceitar e lidar com entradas ruidosas sem que elas fiquem fora de distribuição e (2) gerar uma saída de boa qualidade
+Os repositórios do GitHub podem ser acessados ​​de duas maneiras principais: Por meio da API REST do GitHub, como vimos no Capítulo 7, onde baixamos todos os problemas do GitHub da biblioteca Transformers
+Por meio de inventários de conjuntos de dados públicos como o do Google BigQuery
+Como a API REST é limitada por taxa e precisamos de muitos dados para nosso corpus de pré-treinamento, usaremos o Google BigQuery para extrair todos os repositórios Python
+Bigquery-public-data
+github_repos
+tabela de conteúdo contém cópias de todos os arquivos ASCII com menos de 10 MB
+Além disso, os projetos também precisam ser de código aberto para serem incluídos, conforme determinado pela LicenseAPI do GitHub
+O conjunto de dados do Google BigQuery não contém estrelas ou informações de uso downstream e, para filtrar por estrelas ou uso em bibliotecas downstream, podemos usar a API REST do GitHub ou um serviço como Bibliotecas
+io que monitora pacotes de código aberto
+De fato, um conjunto de dados chamado CodeSearchNetfoi lançado recentemente por uma equipe do GitHub que filtrou repositórios usados ​​em pelo menos uma tarefa downstream usando informações de Bibliotecas
+io
+Este conjunto de dados também é pré-processado de várias maneiras (extraindo métodos de nível superior, dividindo comentários do código, tokenizando o código). pegue todos os arquivos Python no conjunto de dados GitHub BigQuery
+Vamos dar uma olhada no que é necessário para criar um conjunto de dados de código com o GoogleBigQuery
+Criando um conjunto de dados com o Google BigQueryComeçaremos extraindo todos os arquivos Python nos repositórios públicos do GitHub do instantâneo no Google BigQuery
+As etapas para exportar esses arquivos são adaptadas da implementação do TransCoder e são as seguintes: Crie uma conta do Google Cloud (uma avaliação gratuita deve ser suficiente)
+Crie um projeto do Google BigQuery em sua contaNeste projeto, crie um conjunto de dadosNeste conjunto de dados, crie uma tabela onde os resultados da solicitação SQL abaixo serão armazenados
+Prepare e execute a seguinte consulta SQL no github_repostableAntes de executar a solicitação SQL, certifique-se de alterar as configurações da consulta para salvar os resultados da consulta na tabela (MORE Query Settings Destination Set a destination table for query results put table name)Execute a solicitação SQL! comando processa cerca de 2
+6 TB de dados para extrair 26
+8 milhões de arquivos
+O resultado é um conjunto de dados de cerca de 47 GB de arquivos JSON compactados, cada um contendo o código-fonte dos arquivos Python
+Filtramos para remover arquivos vazios e pequenos, como _init_
+py que não contém muita informação útil
+Também removemos arquivos maiores que 1 MB que não estão incluídos no despejo do BigQuery
+Também baixamos as licenças de todo o arquivo para que possamos filtrar os dados de treinamento com base nas licenças, se quisermos
+Vamos baixar os resultados para nossa máquina local
+Se você tentar fazer isso em casa, certifique-se de ter uma boa largura de banda disponível e pelo menos 50 GB de espaço livre em disco
+A maneira mais fácil de obter a tabela resultante para sua máquina local segue este processo de duas etapas:Exportar seus resultados para o Google Cloud:Criar um intervalo e uma pasta no Google Cloud Storage(GCS)Exportar sua tabela para este intervalo selecionando EXPORTExportar para o formato de exportação GCS JSON , compressão GZIPPara fazer o download do bucket em sua máquina, use a biblioteca gsutil:Por uma questão de reprodutibilidade e se a política sobre o uso gratuito do BigQuery mudar no futuro, também compartilharemos esse conjunto de dados no Hugging Face Hub
+Na verdade, na próxima seção, vamos realmente carregar este repositório no Hub juntos! Por enquanto, se você não usou as etapas acima no BigQuery, pode baixar diretamente o conjunto de dados do Hub da seguinte forma: Agora podemos recuperar o conjunto de dados simplesmente com :Trabalhar com um conjunto de dados de 50 GB pode ser uma tarefa desafiadora
+Por um lado, requer espaço em disco suficiente e, por outro lado, deve-se ter cuidado para não ficar sem RAM
+Na seção a seguir, veremos como a biblioteca de conjuntos de dados ajuda a lidar com grandes conjuntos de dados em máquinas pequenas
+Trabalhando com grandes conjuntos de dados Carregar um conjunto de dados muito grande geralmente é uma tarefa desafiadora, especialmente quando os dados são maiores do que a RAM da sua máquina
+Para um conjunto de dados de pré-treinamento em larga escala, esta é uma situação muito comum
+Em nosso exemplo, temos 47 GB de dados compactados e cerca de 200 GB de dados não compactados, o que provavelmente não é possível extrair e carregar na memória RAM de um laptop ou desktop de tamanho padrão
+Felizmente, a biblioteca Datasets foi projetada desde o início para superar esse problema com dois recursos específicos que permitem que você se liberte de:1
+Limitações de RAM com mapeamento de memória2
+Limitações de espaço no disco rígido com streaming de mapeamento de memória Para superar as limitações de RAM, o Datasets usa um mecanismo para mapeamento de memória de cópia zero e sobrecarga zero que é ativado por padrão
+Basicamente, cada conjunto de dados é armazenado em cache na unidade em um arquivo que é um reflexo direto do conteúdo na memória RAM
+Em vez de carregar o conjunto de dados na RAM, o Datasets abre um ponteiro somente leitura para este arquivo e o usa como um substituto para a RAM, basicamente usando o disco rígido como uma extensão direta da memória RAM
+Você pode se perguntar se isso não pode tornar nosso treinamento I/Obound
+Na prática, os dados NLP geralmente são muito leves para carregar em comparação com os cálculos de processamento do modelo, então isso raramente é um problema
+Além disso, o formato zero-copy/zero-overhead usado sob o capô é o Apache Arrow, o que o torna muito eficiente para acessar qualquer elemento
+Vamos dar uma olhada em como podemos usar isso com nossos conjuntos de dados: Até agora, usamos principalmente a biblioteca Datasets para acessar conjuntos de dados remotos no Hugging Face Hub
+Aqui, carregaremos diretamente nossos 48 GB de arquivos JSON compactados que armazenamos localmente
+Como os arquivos JSON são compactados, primeiro precisamos descompactá-los, quais conjuntos de dados cuidam para nós
+Tenha cuidado porque isso requer cerca de 380 GB de espaço livre em disco
+Ao mesmo tempo, isso não usará quase nenhuma RAM
+Definindo delete_extracted=True na configuração de download do conjunto de dados, podemos garantir que excluímos todos os arquivos que não precisamos mais o mais rápido possível: Nos bastidores, os conjuntos de dados extraíram e leram todos os arquivos JSON compactados carregando-os em um único otimizado arquivo de cache
+Vamos ver o tamanho desse conjunto de dados uma vez carregado: Como podemos ver, este conjunto de dados é muito maior do que nossa memória RAM típica, mas ainda podemos carregá-lo e acessá-lo
+Na verdade, ainda estamos usando uma quantidade muito limitada de memória com nosso interpretador Python
+O arquivo na unidade é usado como uma extensão da RAM
+Iterar nele é um pouco mais lento do que iterar nos dados da memória, mas geralmente é mais do que suficiente para qualquer tipo de processamento NLP
+Vamos executar um pequeno experimento em um subconjunto do conjunto de dados para ilustrar isso:
+Isso é ótimo, mas e se você não conseguir liberar espaço em disco suficiente para armazenar o conjunto de dados completo localmente? Todo mundo conhece a sensação de desamparo ao receber um aviso de disco cheio e, em seguida, reclamar dolorosamente GB após GB procurando por arquivos ocultos para excluir
+Felizmente, você não precisa armazenar o conjunto de dados completo localmente se usar o recurso de streaming da biblioteca de conjuntos de dados! Streaming Ao expandir, alguns conjuntos de dados serão difíceis de caber em um disco rígido padrão
+Nesse caso, uma alternativa para escalar o servidor que você está usando é transmitir o conjunto de dados
+Isso também é possível com a biblioteca Datasets para vários formatos de arquivo compactados ou não compactados que podem ser lidos linha por linha, como JSON Lines, CSV ou texto, raw, zip, gzip ou zstandard compactado
+Vamos carregar nosso conjunto de dados diretamente dos arquivos JSON compactados em vez de criar um arquivo de cache a partir deles: Como você pode notar, o carregamento do conjunto de dados foi instantâneo! No modo streaming, o conjunto de dados dos arquivos JSON compactados será aberto e lido em tempo real
+Nosso conjunto de dados agora é um objeto IterableDataset
+Isso significa que não podemos acessar elementos aleatórios como conjunto de dados transmitidos [1264], mas precisamos lê-los em ordem, por exemplo, com next(iter(streamed_dataset))
+Ainda é possível usar métodos como shuffle(), mas eles funcionarão buscando um buffer de exemplos e embaralhando dentro desse buffer (o tamanho do buffer é ajustável)
+Quando vários arquivos são fornecidos como arquivos brutos (como aqui nossos 188 arquivos), shuffle() também irá randomizar a ordem dos arquivos para a iteração
+Vamos criar um iterador para nosso conjunto de dados transmitido e dar uma olhada nos primeiros exemplos: Observe que, quando carregamos nosso conjunto de dados, fornecemos os nomes de todos os arquivos JSON
+Mas quando nossa pasta contém apenas um conjunto de arquivos JSON, CSV ou texto, também podemos apenas fornecer o caminho para a pasta e os conjuntos de dados cuidarão de listar os arquivos, usando o conveniente carregador de formato de arquivos e iterando os arquivos para nós
+Uma maneira mais simples de carregar o conjunto de dados é assim: O principal interesse de usar um conjunto de dados de streaming é que carregar esse conjunto de dados não criará um arquivo de cache na unidade quando carregado ou exigirá qualquer memória RAM (significativa)
+Os arquivos brutos originais são extraídos e lidos em tempo real quando um novo lote de exemplos é solicitado e apenas a amostra ou lote é carregado na memória
+O streaming é especialmente poderoso quando o conjunto de dados não é armazenado localmente, mas acessado diretamente em um servidor remoto sem baixar os arquivos de dados brutos localmente
+Em tal configuração, podemos usar grandes conjuntos de dados arbitrários em um servidor (quase) arbitrariamente pequeno
+Vamos enviar nosso conjunto de dados para o Hugging FaceHub e acessá-lo com streaming
+Adicionando conjuntos de dados ao Hugging Face HubEnviar nosso conjunto de dados para o Hugging Face Hub nos permitirá, em particular:Acessá-lo facilmente a partir de nosso servidor de treinamentoVeja como o conjunto de dados de streaming também funciona perfeitamente com conjuntos de dados do HubCompartilhe-o com a comunidade, incluindo você, caro leitor!Para carregar o conjunto de dados, primeiro precisamos fazer login em nossa conta do Hugging Face, executando o loginhuggingface-cli no terminal e fornecendo as credenciais relevantes
+Feito isso, podemos criar diretamente um novo conjunto de dados no Hub e carregar os arquivos JSON compactados
+Para facilitar, vamos criar dois repositórios: um para a divisão do trem e outro com a divisão da validação
+Podemos fazer isso executando o comando po create da CLI da seguinte forma: Aqui especificamos que o repositório deve ser um conjunto de dados (em contraste com os repositórios de modelo usados ​​para armazenar pesos), junto com a organização que gostaríamos de armazenar o repositórios sob
+Se você estiver executando este código em sua conta pessoal, poderá omitir o sinalizador da organização
+Em seguida, precisamos clonar esses repositórios vazios em nossa máquina local, copiar os arquivos JSON para eles e enviar as alterações para o Hub
+Pegaremos o último arquivo JSON compactado dos 184 que temos como arquivo de validação, i
+e
+aproximadamente 0
+5 por cento do nosso conjunto de dados: O git add
+etapa pode levar alguns minutos, pois um hash de todos os arquivos é calculado
+O upload de todos os arquivos também levará um pouco de tempo
+Como poderemos usar o streaming mais adiante neste capítulo, esta etapa não é perda de tempo e nos permitirá ir significativamente mais rápido no restante de nossos experimentos
+E é isso! Nossas duas divisões do conjunto de dados, bem como o conjunto de dados completo, agora estão disponíveis no Hugging Face Hub nos seguintes URLs: Devemos adicionar cartões README que explicam como ambos os conjuntos de dados foram criados e o máximo de informações úteis possível
+Um conjunto de dados bem documentado tem mais probabilidade de ser útil para outras pessoas, bem como para você mesmo no futuro
+A modificação do README também pode ser feita diretamente no Hub
+Agora que nosso conjunto de dados está online, podemos baixá-lo ou transmitir exemplos dele de qualquer lugar com: Podemos ver que obtemos os mesmos exemplos do conjunto de dados local, o que é ótimo
+Isso significa que agora podemos transmitir o conjunto de dados para qualquer máquina com acesso à Internet sem nos preocupar com espaço em disco
+Agora que temos um grande conjunto de dados, é hora de pensar sobre o modelo
+Na próxima seção, exploramos várias opções para o objetivo pré-treinamento
+Um Conto de Objetivos de Pré-treinamento Agora que temos acesso a um corpus de pré-treinamento em grande escala, podemos começar a pensar em como pré-treinar um modelo de linguagem
+Com uma base de código tão grande que consiste em trechos de código como o mostrado na Figura 10-1, podemos lidar com várias tarefas que influenciam a escolha dos objetivos de pré-treinamento
+Vamos dar uma olhada em três escolhas comuns
+Figura 10
+Um exemplo de uma função Python que pode ser encontrada em nosso conjunto de dados
+Modelagem de Linguagem Causal Uma tarefa natural com dados textuais é fornecer um modelo com o início de uma amostra de código e pedir a ele para gerar possíveis conclusões
+Este é um objetivo de treinamento auto-supervisionado no qual podemos usar o conjunto de dados sem anotações e é frequentemente referido como Modelagem de Linguagem Causal ou Modelagem Auto-regressiva
+A probabilidade de uma determinada sequência de tokens é modelada como as probabilidades sucessivas de cada token dado tokens passados, e treinamos um modelo para aprender essa distribuição e prever o token mais provável para completar um trecho de código
+Uma tarefa downstream diretamente relacionada a tal tarefa de treinamento auto-supervisionada é o preenchimento automático de código com tecnologia de IA
+Uma arquitetura apenas de decodificador, como a família de modelos GPT, geralmente é mais adequada para esta tarefa, conforme mostrado na Figura 10-2
+Figura 10-2
+Os tokens futuros são mascarados na Modelagem de Linguagem Causal e o modelo precisa predizê-los
+Normalmente, um modelo de decodificador como o GPT é usado para tal tarefa
+Modelagem de linguagem mascarada Uma tarefa relacionada, mas um pouco diferente, é fornecer um modelo com uma amostra de código ruidoso (por exemplo, com uma instrução de código substituída por uma palavra aleatória) e pedir que reconstrua a amostra limpa original conforme ilustrado na Figura 10-3
+Este também é um objetivo de treinamento auto-supervisionado e comumente chamado de Masked Language Modeling ou Denoising Objective
+É mais difícil pensar em uma tarefa de downstream diretamente relacionada à redução de ruído, mas geralmente é uma boa tarefa de pré-treinamento para aprender representações gerais para tarefas posteriores de downstream
+Muitos dos modelos que usamos nos capítulos anteriores (como o BERT) foram pré-treinados com um objetivo de redução de ruído
+O treinamento de um modelo de linguagem mascarada em um grande corpus pode, portanto, ser combinado com uma segunda etapa de ajuste fino do modelo em uma tarefa posterior com um número limitado de exemplos rotulados
+Adotamos essa abordagem nos capítulos anteriores e, para código, poderíamos usar a tarefa de classificação de texto para detecção/classificação de linguagem de código
+Este é o mecanismo subjacente ao procedimento de pré-treinamento de modelos de codificador, como BERT
+Figura 10-3
+Na modelagem de linguagem mascarada, alguns dos tokens de entrada são mascarados ou substituídos e a tarefa do modelo é prever os tokens originais
+Esta é a arquitetura subjacente ao BERTbranch de modelos de transformadores
+Treinamento Sequência a Sequência Uma tarefa alternativa é usar uma heurística como expressões regulares para separar comentários ou docstrings do código e construir um conjunto de dados de grande escala de pares (código, comentários) que podem ser usados ​​como um conjunto de dados anotado
+A tarefa de treinamento é então um objetivo de treinamento supervisionado no qual uma categoria (código ou comentário) é usada como entrada para o modelo e a outra categoria (respectivamente comentário ou código) é usada como rótulos
+Este é um caso de aprendizado supervisionado com pares (entrada, rótulos) conforme destacado na Figura 10-4
+Com um conjunto de dados grande, limpo e diversificado, bem como um modelo com capacidade suficiente, podemos tentar treinar um modelo que aprenda a transcrever comentários em código ou vice-versa
+Uma tarefa a jusante diretamente relacionada a esta tarefa de treinamento supervisionado é então “Documentação da geração de código” ou “Código da geração de documentação” dependendo de como definimos nossas entradas/saídas
+Ambas as tarefas não são de igual dificuldade e, em particular, gerar código a partir da documentação pode parecer a priori uma tarefa mais difícil de resolver
+Em geral, quanto mais próxima a tarefa estiver de "reconhecimento/correspondência de padrões", mais provavelmente o desempenho será decente com o tipo de técnicas de aprendizado profundo que exploramos neste livro
+Nesta configuração, uma sequência é traduzida em outra sequência onde as arquiteturas codificador-decodificador geralmente brilham
+Figura 10-4
+Usando heurística, as entradas podem ser divididas em pares de comentário/código
+O modelo recebe um elemento como entrada e precisa gerar o outro
+Uma arquitetura natural para tal tarefa sequência a sequência é uma configuração de codificador-decodificador
+Você pode reconhecer que essas abordagens refletem como alguns dos principais modelos que vimos e usamos nos capítulos anteriores são treinados: Modelos pré-treinados generativos como a família GPT são treinados usando um objetivo de Modelagem de Linguagem Causal Modelos de redução de ruído como a família BERT são treinados usando uma Modelagem de Linguagem Mascarada Objetivo Modelos codificador-decodificador como os modelos T5, BART ou PEGASUS são treinados usando heurística para criar pares de (entradas, rótulos)
+Essas heurísticas podem ser, por exemplo, um corpus de pares de frases em dois idiomas para um modelo de tradução automática, uma maneira heurística de identificar resumos em um grande corpus para um modelo de resumo ou várias maneiras de corromper entradas com entradas não corrompidas associadas como rótulos, que é uma maneira mais flexível de executar denoising do que a modelagem de linguagem mascarada anterior
+Como queremos construir um modelo de preenchimento automático de código, selecionamos o primeiro tipo de objetivo e escolhemos uma arquitetura GPT para a tarefa
+O preenchimento automático de código é a tarefa de fornecer sugestões para completar linhas ou funções de códigos durante a programação, a fim de tornar a experiência de um programador significativamente mais fácil
+O preenchimento automático de código pode ser particularmente útil ao programar em uma nova linguagem ou estrutura ou ao aprender a codificar
+Também é útil para produzir automaticamente código repetitivo
+Exemplos típicos de tais produtos comerciais usando modelos de IA em meados de 2021 são GitHub Copilot, TabNine ou Kite, entre outros
+A primeira etapa ao treinar um modelo do zero é criar um novo tokenizador personalizado para a tarefa
+Na próxima seção, veremos o que é necessário para criar um atokenizer do zero
+Construindo um TokenizerAgora que reunimos e carregamos nosso grande conjunto de dados, vamos ver como podemos processá-lo para alimentar e treinar nosso modelo
+Como vimos desde o Capítulo 2, a primeira etapa será tokenizar o conjunto de dados para prepará-lo em um formato que nosso modelo possa ingerir, ou seja, números em vez de strings
+Nos capítulos anteriores, usamos tokenizers que já foram fornecidos com seus respectivos modelos
+Isso faz sentido, pois nossos modelos foram pré-treinados usando dados passados ​​por um pipeline de pré-processamento específico definido no tokenizador
+Ao usar um modelo pré-treinado, é importante manter as mesmas opções de projeto de pré-processamento selecionadas para o pré-treinamento
+Caso contrário, o modelo pode ser alimentado com padrões fora de distribuição ou tokens desconhecidos
+No entanto, quando treinamos o modelo do zero em um novo conjunto de dados, o uso de um tokenizador preparado para outro conjunto de dados pode não ser o ideal
+Vamos ilustrar o que queremos dizer com abaixo do ideal com alguns exemplos: O tokenizador T5 foi treinado em um corpus muito grande de texto chamado Colossal Clean Crawled Corpus (C4), mas uma extensa etapa de filtragem de stop-word foi usada para criá-lo
+Como resultado, o T5tokenizer nunca viu palavras comuns em inglês como “sexo”
+O tokenizer CamemBERT também foi treinado em um corpus muito grande de texto, mas compreendendo apenas texto em francês (o subconjunto francês do corpus OSCAR)
+Como tal, não tem conhecimento de palavras comuns em inglês como “ser”
+Podemos testar facilmente esses recursos de cada tokenizer na prática: Em muitos casos, dividir essas palavras muito curtas e comuns em subpartes será ineficiente, pois isso aumentará o comprimento da sequência de entrada do modelo
+Portanto, é importante estar ciente do domínio e da filtragem do conjunto de dados que foi usado para treinar o tokenizer
+O tokenizer e o modelo podem codificar o viés do conjunto de dados que tem um impacto em seu comportamento downstream
+Para criar um tokenizador ideal para nosso conjunto de dados, precisamos treinar um nós mesmos
+Vejamos como isso pode ser feito
+NOTATreinar um modelo envolve começar a partir de um determinado conjunto de pesos e usar (no atual cenário de aprendizado de máquina) retropropagação de um sinal de erro em um objetivo projetado para minimizar a perda do modelo e (espera-se) encontrar um conjunto ideal de pesos para o modelo para realizar a tarefa definida pelo objetivo do treinamento
+O atokenizer de treinamento, por outro lado, não envolve retropropagação ou pesos
+É uma forma de criar um mapeamento ótimo para ir de uma string de texto para uma lista de inteiros que podem ser avaliados pelo modelo em um determinado corpus
+Nos tokenizadores de hoje, a string ideal para conversão inteira envolve um vocabulário que consiste em uma lista de strings atômicas e um método associado para converter, normalizar, cortar ou mapear uma string de texto em uma lista de índices com esse vocabulário
+Esta lista de índices é então a entrada para nossa rede neural
+O pipeline do tokenizadorAté agora, tratamos o tokenizador como uma única operação que transforma strings em inteiros que podemos passar pelo modelo
+Isso não é inteiramente verdade e, se olharmos mais de perto o tokenizador, podemos ver que é um pipeline de processamento completo que geralmente consiste em quatro etapas, conforme mostrado na Figura 10-5
+Figura 10-5
+Um pipeline de tokenização geralmente consiste em quatro etapas de processamento
+Vamos dar uma olhada em cada etapa de processamento e ilustrar seu efeito com a frase de exemplo imparcial "Transformadores são incríveis!:NormalizaçãoEsta etapa corresponde ao conjunto de operações que você aplica a uma string bruta para torná-la menos aleatória ou "mais limpa"
+As operações comuns incluem remover espaços em branco, remover caracteres acentuados ou colocar todo o texto em letras minúsculas
+Se você estiver familiarizado com a normalização Unicode, também é uma operação de normalização muito comum aplicada na maioria dos tokenizadores
+Muitas vezes existem várias maneiras de escrever o mesmo caractere abstrato
+Ele pode fazer duas versões da “mesma” string (i
+e
+com a mesma seqüência de caracteres abstratos) aparecem diferentes
+Esquemas de normalização Unicode como NFC, NFD, NFKC, NFKD substituem as várias maneiras de escrever o mesmo caractere com formulários padrão
+Outro exemplo de normalização é o "minúsculo" que às vezes é usado para reduzir o tamanho do vocabulário necessário para o modelo de se espera que o modelo aceite e use apenas caracteres minúsculos
+Após essa etapa de normalização, nossa string de exemplo pode parecer que os transformadores são incríveis!"
+PretokenizaçãoEsta etapa divide um texto em objetos menores que fornecem um limite superior para o que seus tokens serão no final do treinamento
+Uma boa maneira de pensar nisso é que o pretokenizer dividirá seu texto em "palavras" e, em seguida, seus tokens finais serão partes dessas palavras
+Para os idiomas que permitem isso (inglês, alemão e muitos idiomas ocidentais), as strings podem ser divididas em palavras, geralmente com espaços em branco e pontuação
+Por exemplo, esta etapa pode transformar nosso exemplo em algo como
+Essas palavras são então mais simples de dividir em subpalavras com codificação de pares de bytes (BPE) ou algoritmos de Unigrama na próxima etapa do pipeline
+No entanto, a divisão em “palavras” nem sempre é uma operação trivial e determinística ou mesmo uma operação que faz sentido
+Por exemplo, em idiomas como chinês, japonês ou coreano, agrupar símbolos em unidades semânticas como palavras ocidentais pode ser uma operação não determinística com vários grupos igualmente válidos
+Nesse caso, pode ser melhor não pre-kenizar o texto e, em vez disso, usar uma biblioteca específica do idioma para pre-kenização
+Modelo tokenizador Uma vez que os textos de entrada são normalizados e pré-kenificados, o tokenizador aplica um modelo de divisão de subpalavras nas palavras
+Esta é a parte do pipeline que precisa ser treinada em seu corpus (ou que foi treinada se você estiver usando um tokenizer pré-treinado)
+O papel do modelo é dividir as “palavras” em subpalavras para reduzir o tamanho do vocabulário e tentar reduzir o número de tokens fora do vocabulário
+Existem vários algoritmos de subwordtokenization, incluindo BPE, Unigram e WordPiece
+Por exemplo, nosso exemplo em execução pode parecer trans,formers, are, awesome, depois que o modelo tokenizador for aplicado
+Observe que neste ponto não temos mais uma lista de strings, mas uma lista de inteiros com os IDs de entrada
+Para manter o exemplo ilustrativo, mantemos as palavras, mas eliminamos os apóstrofos de string para indicar a transformação
+Pós-processamentoEsta é a última etapa do pipeline de tokenização, na qual algumas transformações adicionais podem ser aplicadas na lista de tokens, por exemplo, adicionando possíveis tokens especiais no início ou no final da sequência de entrada de índices de token
+Por exemplo, um tokenizador de estilo BERT transformaria um token de classificação e separador
+Esta sequência de inteiros pode então ser alimentada ao modelo
+O modelo tokenizador é obviamente o coração de todo o pipeline, então vamos falar um pouco mais fundo para entender completamente o que está acontecendo sob o capô
+O modelo do tokenizador A parte do pipeline que pode ser treinada é o “modelo do tokenizador”
+Aqui também devemos ter cuidado para não nos confundirmos
+O “modelo” do tokenizador não é um modelo de rede neural
+É um conjunto de tokens e regras para ir da string para uma lista de índices
+Como discutimos no Capítulo 2, existem vários algoritmos de tokenização de subpalavra, como BPE, WordPiece e Unigram
+O BPE começa a partir de uma lista de unidades básicas (caracteres únicos) e cria um vocabulário por um processo de criação progressiva de novos tokens que consistem na fusão das unidades básicas que ocorrem com mais frequência e adicioná-los ao vocabulário
+Este processo de mesclar progressivamente as peças de vocabulário vistas com mais frequência é reiterado até que um tamanho de vocabulário predefinido seja alcançado
+O Unigram começa do outro lado, inicializando seu vocabulário básico com um grande número de tokens (todas as palavras no corpus e subpalavras potenciais construídas a partir delas) e progressivamente removendo ou dividindo os tokens menos úteis (matematicamente o símbolo que menos contribui para a probabilidade logarítmica do corpus de treinamento) para obter um vocabulário cada vez menor até que o tamanho do vocabulário alvo seja alcançado
+A diferença entre esses vários algoritmos e seu impacto no desempenho downstream varia dependendo da tarefa e, em geral, é bastante difícil identificar se um algoritmo é claramente superior aos outros
+Ambos BPE e Unigram têm desempenho razoável na maioria dos casos
+WordPiece é um predecessor do Unigram, e sua implementação oficial nunca foi de código aberto pelo Google
+Medindo o desempenho do tokenizador A otimização e o desempenho de um tokenizador também são bastante difíceis de medir na prática
+Algumas maneiras de medir a otimização incluem: Subword Fertility, que calculou o número médio de subpalavras produzidas por palavra tokenizada
+Proporção de palavras continuadas que se refere à proporção de palavras em um corpus onde a palavra tokenizada é continuada em pelo menos dois sub-tokens
+Métricas de cobertura como a proporção de palavras desconhecidas ou tokens raramente usados ​​em um corpus tokenizado
+Além disso, a robustez para erros de ortografia ou ruído é frequentemente estimada, bem como desempenhos de modelo em exemplos fora do domínio, pois dependem fortemente do processo de tokenização
+Essas medidas fornecem um conjunto de visões diferentes sobre o desempenho do tokenizador, mas tendem a ignorar a interação do tokenizador com o modelo (e
+g
+a fertilidade da subpalavra é minimizada pela inclusão de todas as palavras possíveis no vocabulário, mas isso produzirá um vocabulário muito grande para o modelo)
+No final, o desempenho das várias abordagens de tokenização geralmente é melhor estimado usando o desempenho a jusante do modelo como a métrica final
+Por exemplo, o bom desempenho das primeiras abordagens de BPE foi demonstrado ao mostrar um desempenho aprimorado na tradução automática dos modelos treinados usando esses tokenização e vocabulários em vez de tokenização baseada em caracteres ou palavras
+AVISO Os termos “tokenizador” e “tokenização” são termos sobrecarregados e podem significar coisas diferentes em campos diferentes
+Por exemplo, em lingüística, a tokenização às vezes é considerada o processo de demarcar e possivelmente classificar seções de uma sequência de caracteres de entrada de acordo com classes linguisticamente significativas, como substantivos, verbos, adjetivos ou pontuação
+Neste livro, o tokenizador e o processo de tokenização não estão particularmente alinhados com unidades linguísticas, mas são calculados de maneira estatística a partir das estatísticas de caracteres do corpus para agrupar os símbolos mais prováveis ​​ou que ocorrem com mais frequência.
+Vamos ver como podemos construir nosso próprio tokenizador otimizado para código Python
+Um pipeline de tokenização para PythonAgora que vimos o funcionamento de um tokenizador em detalhes, vamos começar a criar um para nosso caso de uso: tokenização de código Python
+Aqui a questão da pretokenização merece alguma discussão para linguagens de programação
+Se dividirmos os espaços em branco e removê-los, perderemos todas as informações de indentação em Python que são importantes para a semântica do programa
+Apenas pense em loops while e instruções if-then-else
+Por outro lado, as quebras de linha não são significativas e podem ser adicionadas ou removidas sem afetar a semântica
+Da mesma forma, a pontuação como um sublinhado é usada para criar um único nome de variável a partir de várias subpartes e a divisão no sublinhado pode não fazer tanto sentido quanto faria na linguagem natural
+Usar um pretokenizer de linguagem natural para código de tokenização parece, portanto, potencialmente abaixo do ideal
+Uma maneira de resolver esse problema pode ser usar um pretokenizer projetado especificamente para Python, como o módulo tokenize integrado: Vemos que o tokenizer divide nossa string de código em unidades significativas (operação de código, comentários, indentação e dedentação etc.)
+Um problema com o uso dessa abordagem é que esse pretokenizer é baseado em Python e, como tal, normalmente bastante lento e limitado pelo Python GIL
+Por outro lado, a maioria dos tokenizers em Transformers são fornecidos pela biblioteca Tokenizers que são codificados em Rust
+Os tokenizers Rust são muitas ordens de magnitude mais rápidos para treinar e usar e, portanto, provavelmente desejaríamos usá-los devido ao tamanho de nosso corpus
+Vamos ver qual tokenizer pode ser interessante para usarmos para nós na coleção fornecida no hub
+Queremos um tokenizador que preserve os espaços
+Um bom candidato pode ser um tokenizador de nível de byte como o tokenizador de GPT-2
+Vamos carregar este tokenizador e explorar suas propriedades de tokenização: Esta é uma saída bastante estranha, vamos tentar entender o que está acontecendo aqui executando os vários submódulos do pipeline que acabamos de ver
+Vamos ver qual normalização é aplicada neste tokenizer:print(tokenizer
+backend_tokenizer
+normalizer)NoneEste tokenizador não usa normalização
+Este tokenizador está trabalhando diretamente nas entradas Unicode brutas sem etapas de limpeza/normalização
+Vamos dar uma olhada na pretokenização: Esta saída é um pouco estranha
+O que são todos esses símbolos e quais são os números que acompanham os tokens? Vamos explicar ambos e entender melhor como funciona esse tokenizador
+Vamos começar com os números
+A biblioteca Tokenizers tem um recurso muito útil que discutimos um pouco nos capítulos anteriores: rastreamento de deslocamento
+Todas as operações na string de entrada são rastreadas para que seja possível saber exatamente a qual parte da string de entrada corresponde um token de saída
+Esses números simplesmente indicam de onde vem cada token na string original
+Por exemplo, a palavra 'hello' corresponde aos caracteres 8 a 13 na string original
+Se alguns caracteres forem removidos em uma etapa de normalização, ainda poderemos associar cada token à respectiva parte na string original
+A outra característica curiosa do texto tokenizado são os caracteres estranhos, como
+Nível de byte significa que nosso tokenizador funciona em bytes em vez de caracteres Unicode
+Cada caractere Unicode é composto de 1 a 4 bytes, dependendo do caractere Unicode
+O bom dos bytes é que, embora existam 143.859 caracteres Unicode em todo o alfabeto Unicode, existem apenas 256 elementos nos alfabetos dos bytes e você pode expressar cada caractere Unicode como uma sequência de 1 a 4 desses bytes
+Se trabalharmos em bytes podemos assim expressar todas as strings no mundo UTF-8 como strings mais longas neste alfabeto de 256 valores
+Basicamente, poderíamos ter um modelo usando um alfabeto de apenas 256 palavras e ser capaz de processar qualquer string Unicode
+Vamos dar uma olhada em como são as representações byte de alguns caracteres: A esta altura você pode se perguntar: por que é interessante trabalhar em nível de byte? Vamos investigar as várias opções que temos para definir um vocabulário para nosso modelo e tokenizers
+Poderíamos decidir construir nosso vocabulário a partir dos 143.859 caracteres Unicode e adicionar a esse vocabulário básico combinações frequentes desses caracteres, também conhecidas como palavras e subpalavras
+Mas ter um vocabulário de mais de 140.000 palavras será demais para um modelo de aprendizagem profunda
+Precisaremos modelar cada caractere Unicode com um vetor de incorporação e alguns desses caracteres raramente são vistos e serão muito difíceis de aprender
+Observe também que esse número de 140.000 será um limite inferior no tamanho do nosso vocabulário, pois gostaríamos de ter também palavras,i
+e
+combinação de caracteres Unicode em nosso vocabulário! No outro extremo, se usarmos apenas os valores de 256 bytes como nosso vocabulário, as sequências de entrada serão segmentadas em muitos pedaços pequenos (cada byte constituindo os caracteres Unicode) e, como tal, nosso modelo terá que funcionar em entradas longas e gastar um poder de computação significativo na reconstrução de caracteres Unicode de seus bytes separados e, em seguida, palavras desses caracteres
+Consulte o documento que acompanha o byteT5 modelrelease para um estudo detalhado dessa sobrecarga5
+Uma solução intermediária é construir um vocabulário de tamanho médio estendendo o vocabulário de 256 palavras com a combinação mais comum de bytes
+Esta é a abordagem adotada pelo algoritmo BPE
+A idéia é construir progressivamente um vocabulário de um tamanho pré-definido, criando novos tokens de vocabulário por meio da fusão iterativa do par de tokens que ocorre com mais frequência no vocabulário
+Por exemplo, se t e h ocorrerem juntos com muita frequência como em inglês, adicionaremos um token th no vocabulário para modelar esse par de tokens em vez de mantê-los separados
+Partindo de um vocabulário básico de unidades elementares (normalmente os caracteres ou os valores de 256 bytes em nosso caso), podemos modelar qualquer string com eficiência
+ATENÇÃOTenha cuidado para não confundir o “byte” em “Byte-Pair Encoding” com o “byte” em “ByteLevel”
+O nome “Byte-Pair Encoding” vem de uma técnica de compressão de dados proposta por Philip Gage em 1994 e originalmente operando em bytes6
+Ao contrário do que seu nome pode indicar, os algoritmos BPE padrão em NLP normalmente operam em strings Unicode em vez de bytes, porém, a codificação de par de bytes em nível de byte é um novo tipo de codificação de par de bytes trabalhando especificamente em bytes
+Se lermos nossa string Unicode em bytes, podemos reutilizar um simples algoritmo de divisão de subpalavras de codificação de pares de bytes
+Há apenas um problema para poder usar um algoritmo BPE típico em NLP
+Como acabamos de mencionar, esses algoritmos geralmente são projetados para funcionar com "string Unicode" limpa como entradas e não bytes e geralmente esperam caracteres ASCII regulares nas entradas e, por exemplo, sem espaços ou caracteres de controle
+Mas no caractere Unicode correspondente aos 256 primeiros bytes, existem muitos caracteres de controle (novas linhas, tabulações, escape, alimentação de linha e outros caracteres não imprimíveis)
+Para superar esse problema, o tokenizer GPT-2 primeiro mapeia todos os 256 bytes de entrada para strings Unicode que podem ser facilmente digeridas pelos algoritmos BPE padrão, i
+e
+mapearemos nossos 256 valores elementares para strings Unicode que correspondem a caracteres Unicode imprimíveis padrão
+Não é muito importante que esses caracteres Unicode sejam codificados com 1 byte ou mais, o importante é ter 256 valores únicos no final, formando nosso vocabulário base, e que esses 256 valores sejam tratados corretamente pelo nosso algoritmo BPE
+Vamos ver alguns exemplos desse mapeamento no tokenizer GPT-2
+Podemos acessar o mapeamento de 256 valores da seguinte forma:E podemos dar uma olhada em alguns valores comuns de bytes e caracteres Unicode mapeados associados:Todos os valores de byte simples correspondentes a caracteres regulares comoPoderíamos ter usado uma conversão mais explícita, como mapear novas linhas para uma stringNEWLINE, mas BPE os algoritmos são normalmente projetados para palavra em caractere, portanto, manter a equivalência de 1 caractere Unicode para cada caractere byte é mais fácil de lidar com um algoritmo BPE pronto para uso
+Agora que fomos apresentados à magia negra das codificações Unicode, podemos entender um pouco melhor nossa conversão de tokenização: Podemos reconhecer aqui as novas linhas (que são mapeadas como sabemos agora) e os espaços (mapeados para)
+Também vemos que:Espaços, e em particular espaços consecutivos, são conservados (por exemplo, os três espaços em),Espaços consecutivos são considerados como uma única palavra,Cada espaço que precede uma palavra é anexado e considerado como sendo parte da palavra subsequenteAgora que estamos entendemos as etapas de pré-processamento do nosso tokenizador, vamos experimentar o modelo de codificação de pares de bytes
+Como mencionamos, o modelo BPE se encarrega de dividir as palavras em subunidades até que todas as subunidades pertençam ao vocabulário predefinido
+O vocabulário do nosso tokenizer GPT-2 compreende 50257 palavras: o vocabulário base com os 256 valores dos bytes 50.000 tokens adicionais criados pela fusão repetida dos tokens que ocorrem simultaneamente mais comumente um caractere especial adicionado ao vocabulário para representar os limites do documento Podemos verificar isso facilmente por olhando para o atributo de comprimento do tokenizador: Executar o pipeline completo em nosso código de entrada nos dá a seguinte saída: Como podemos ver, o tokenizador BPE mantém a maioria das palavras, mas dividirá os vários espaços de nossa indentação em vários espaços consecutivos
+Isso acontece porque este tokenizador não é especificamente treinado em código e principalmente em texto onde espaços consecutivos são raros
+O modelo BPE, portanto, não inclui um token específico no vocabulário para indentação
+Este é um caso de não adaptação do modelo ao corpus como discutimos anteriormente e a solução, quando o conjunto de dados é grande o suficiente, é treinar novamente o tokenizador no corpus de destino
+Então, vamos ao que interessa! Treinando um tokenizador Vamos treinar novamente nosso tokenizador BPE de nível de byte em uma fatia de nosso corpus para obter um vocabulário melhor adaptado ao código Python
+Retreinar um tokenizador fornecido na biblioteca Transformers é muito simples
+Nós só precisamos: Especificar nosso tamanho de vocabulário de destino, Preparar um iterador para fornecer a lista de strings de entrada para processar para treinar o modelo do tokenizador Chamar o método train_new_from_iterator
+Ao contrário dos modelos de aprendizado profundo, que geralmente são esperados para memorizar muitos detalhes específicos do corpus de treinamento (geralmente vistos como senso comum ou conhecimento de mundo), os tokenizadores são realmente treinados apenas para extrair as principais estatísticas de um corpus e não se concentrar em detalhes
+Resumindo, o tokenizer é treinado apenas para saber quais combinações de letras são as mais frequentes em nosso corpus
+Portanto, você nem sempre precisa treinar seu tokenizador em um corpus muito grande, mas principalmente em um corpus bem representativo de seu domínio e do qual o modelo pode extrair medidas estatisticamente significativas
+Dependendo do tamanho do vocabulário e do corpus, o tokenizer pode acabar memorizando palavras que não seriam esperadas
+Por exemplo, vamos dar uma olhada nas últimas palavras e nas palavras mais longas em nosso tokenizer GPT-2: O primeiro token <|endoftext|> é o token especial usado para especificar o final de uma sequência de texto e foi adicionado após a construção do vocabulário BPE
+Para cada uma dessas palavras, nosso modelo terá que aprender uma incorporação de palavra associada e provavelmente não queremos que o modelo concentre muito poder de representação em algumas dessas palavras barulhentas
+Observe também como algum conhecimento específico do mundo no tempo e no espaço (p.
+g
+nomes próprios como Hitman ou Comissão) são incorporados em um nível muito baixo em nossa abordagem de modelagem, recebendo tokens separados com vetores associados no vocabulário
+Esse tipo de token muito específico em um BPEtokenizer também pode ser uma indicação de que o tamanho do vocabulário de destino é muito grande ou o corpus contém tokens idiossincráticos
+Vamos treinar um novo tokenizer em nosso corpus e examinar seu vocabulário aprendido
+Como só precisamos de um corpus razoavelmente representativo de nossas estatísticas de conjunto de dados, vamos selecionar cerca de 1-2 GB de dados, i
+e
+cerca de 100.000 documentos de nosso corpus:Vamos investigar a primeira e a última palavra criada por nosso algoritmo BPE para ver o quão relevante é nosso vocabulário
+Nas primeiras palavras criadas, podemos ver vários níveis padrão de recuos resumidos nos tokens de espaço em branco, bem como palavras-chave comuns curtas do Python, como self, ou, em
+Este é um bom sinal de que nosso algoritmo BPE está funcionando conforme o esperado
+Nas últimas palavras ainda vemos algumas palavras relativamente comuns como or`inspect`8 assim como um conjunto de palavras mais barulhentas vindas dos comentários
+Também podemos tokenizar nosso exemplo simples de código Python para ver como nosso tokenizer está se comportando em um exemplo simples: Mesmo que não sejam palavras-chave de código, é um pouco irritante ver palavras comuns em inglês como World ou dizer sendo divididas por nosso tokenizer, pois esperamos que elas ocorrem com bastante frequência no corpus
+Vamos verificar se todas as palavras-chave reservadas do Python estão no vocabulário: Vemos que várias palavras-chave bastante frequentes, como finalmente, também não estão no vocabulário
+Vamos tentar construir um vocabulário maior em uma amostra maior de nosso conjunto de dados
+Por exemplo, um vocabulário de 32.768 palavras (múltiplos de 8 são melhores para alguns cálculos de GPU/TPU eficientes posteriormente com o modelo) e treiná-lo em fatias duas vezes maiores de nosso corpus com 200.000 documentos: Não esperamos que o mais frequente, o mais frequente os tokens mudam muito ao adicionar mais documentos, então vamos ver os últimos tokens: Uma breve inspeção não mostra nenhuma palavra-chave de programação regular nas últimas palavras criadas
+Vamos tentar tokenizar nosso exemplo de código de exemplo com o novo tokenizer maior: Aqui também os recuos são convenientemente mantidos dentro do vocabulário e vemos que palavras comuns em inglês como Hello, World e say também são incluídas como tokens únicos, o que parece mais de acordo com nossas expectativas de os dados que o modelo pode ver na tarefa downstream
+Vamos investigar as palavras-chave comuns do Python como fizemos antes: Ainda estamos perdendo a palavra-chave não local, mas essa palavra-chave também é muito raramente usada na prática, pois torna a sintaxe bem mais complexa
+Mantê-lo fora do vocabulário parece razoável
+Vimos que palavras-chave Python muito comuns como def, in ou for estão muito no início do vocabulário, indicando que são muito frequentes como esperado
+Obviamente, a solução mais simples se quiséssemos usar um vocabulário menor seria remover os comentários de código que representam uma parte significativa do nosso vocabulário
+No entanto, no nosso caso, decidiremos mantê-los, assumindo que podem ajudar nosso modelo a lidar com a semântica da tarefa
+Após esta inspeção manual, nosso tokenizer maior parece bem adaptado para nossa tarefa (lembre-se que avaliar objetivamente o desempenho de um tokenizer é uma tarefa desafiadora na prática, conforme detalhamos antes)
+Iremos assim proceder com ele
+Após esta inspeção manual, nosso tokenizador maior parece bem adaptado para nossa tarefa
+Lembre-se de que avaliar objetivamente o desempenho de um tokenizador é uma tarefa desafiadora na prática, conforme detalhamos antes
+Vamos então prosseguir com este e treinar um modelo para ver como funciona na prática
+NOTAVocê pode verificar facilmente que o novo tokenizer é cerca de 2x mais eficiente que o tokenizer padrão
+Isso significa que o tokenizador usa metade dos tokens para codificar um texto do que o existente, o que nos dá o dobro do contexto do modelo efetivo de graça
+Assim, quando treinamos um novo modelo com o novo tokenizador em uma janela de contexto de 1024, é equivalente a treinar o mesmo modelo com o antigo tokenizador em uma janela de contexto de 2048 com a vantagem de ser muito mais rápido e mais eficiente em termos de memória devido ao escalonamento de atenção
+Salvando um tokenizador personalizado no hubAgora que nosso tokenizador está treinado, precisamos salvá-lo
+A maneira mais simples de salvá-lo e poder acessá-lo de qualquer lugar depois é empurrá-lo para o Hugging Face Hub
+Isso será especialmente útil quando usarmos posteriormente um servidor de treinamento separado
+Como este será o primeiro arquivo, precisamos criar um novo repositório de modelo
+Para criar um repositório de modelo privado e salvar nosso tokenizer nele como um primeiro arquivo, podemos usar diretamente o método push_to_hub do tokenizer
+Como já autenticamos nossa conta com huggingface-cli login, podemos simplesmente enviar o tokenizer da seguinte maneira:
+Isso criará um repositório em seu namespace name codeparrot, para que qualquer pessoa possa carregá-lo executando:reloaded_tokenizer = AutoTokenizer
+from_pretrained(model_ckpt)Este tokenizer carregado do Hub se comporta exatamente como nosso tokenizer treinado anteriormente:Podemos investigar seus arquivos e vocabulário salvo no Hub aqui em Este foi um mergulho muito profundo no funcionamento interno do tokenizer e como treinar um tokenizer para um caso de uso específico
+Agora que podemos tokenizar as entradas, podemos começar a construir o modelo: Treinando um modelo do zero Agora é a parte que você provavelmente estava esperando: o modelo! Para construir uma função de autocompletar, precisamos de um modelo auto-regressivo bastante eficiente, então escolhemos um modelo de estilo GPT-2
+Nesta seção, inicializamos um novo modelo sem pesos pré-treinados, configuramos uma classe de carregamento de dados e, finalmente, criamos um loop de treinamento escalável
+No grand finale, treinamos um modelo grande GPT-2! Vamos começar inicializando o modelo que queremos treinar
+este é o 1
+Modelo de parâmetros 5B! Capacidade muito grande, mas também temos um conjunto de dados muito grande com 180 GB de dados
+Em geral, modelos de linguagem grandes são mais eficientes para treinar, desde que nosso conjunto de dados seja razoavelmente grande, podemos definitivamente usar um modelo de linguagem grande
+Vamos enviar o modelo recém-inicializado para o Hub, adicionando-o à nossa pasta tokenizer
+Nosso modelo é grande, então precisaremos ativar git+lfs nele
+Vamos para o nosso crescente repositório de modelos que atualmente contém apenas os arquivos do tokenizer e ative git-lfs para rastrear arquivos grandes facilmente:Enviar o modelo para o Hub pode demorar um minuto devido ao tamanho do ponto de verificação Como este modelo é muito grande, vamos criar um versão menor para fins de depuração e teste
+Tomaremos o tamanho GPT2 padrão como base: Agora que temos um modelo que podemos treinar, precisamos garantir que podemos alimentá-lo com os dados de entrada de forma eficiente durante o treinamento
+Carregador de dadosPara poder treinar com eficiência máxima, desejaremos fornecer ao nosso modelo sequências completas o máximo possível
+Digamos que nosso comprimento de contextoi
+e
+a entrada para nosso modelo é de 1024 tokens, sempre queremos fornecer sequências de 1024 tokens para nossos modelos
+Mas alguns de nossos exemplos de código podem ser menores que 1024 tokens e alguns podem ser mais longos
+A solução mais simples é ter um buffer e preenchê-lo com exemplos até chegarmos a 1024 tokens
+Podemos construir isso agrupando nosso conjunto de dados de streaming em um iterável que cuida da tokenização em tempo real e garante o fornecimento de sequências tokenizadas de comprimento constante como entradas para o modelo
+Isso é bem fácil de fazer com os tokenizadores da biblioteca de transformadores
+Para entender como podemos fazer isso, vamos solicitar um elemento em nosso conjunto de dados de streaming: Vamos agora tokenizar este exemplo e pedir explicitamente ao tokenizer para
+truncar a saída para um comprimento de bloco máximo especificado e
+retorna os tokens excedentes e os comprimentos dos elementos tokenizados Podemos especificar esse comportamento quando chamamos o tokenizer com um texto totokenize: Podemos ver que o tokenizer retorna um lote para nossa entrada onde nossa string inicial bruta foi tokenizada e dividida em sequências de maxmax_length =10 fichas
+O comprimento do item do dicionário nos fornece o comprimento de cada sequência
+O último elemento da sequência de comprimento contém os tokens restantes e é menor que o sequence_length se o número de tokens da string tokenizada não for um múltiplo de sequence_length
+O overflow_to_sample_mapping pode ser usado para identificar qual segmento pertence a qual string de entrada se um lote de entradas for fornecido
+Para alimentar lotes com sequências completas de sequence_length para nosso modelo, devemos descartar a última sequência incompleta ou preenchê-la, mas isso tornará nosso treinamento um pouco menos eficiente e nos forçará a cuidar do preenchimento e mascaramento de rótulos de token preenchidos
+Somos muito mais computacionais do que limitados a dados e, portanto, seguiremos o caminho mais fácil e eficiente aqui
+Podemos usar um pequeno truque para garantir que não perderemos muitos segmentos finais
+Podemos concatenar vários exemplos antes de passá-los para o tokenizer,separados pelo token especial e atingir um comprimento mínimo de caracteres antes de enviar a string para o tokenizer
+Vamos primeiro estimar o comprimento médio de caracteres por tokens em nosso conjunto de dados: Podemos, por exemplo, garantir que tenhamos aproximadamente 100 sequências completas em nossos exemplos tokenizados definindo nosso comprimento de caractere de string de entrada como: por token de saída que acabamos de estimar: 3
+6Se inserirmos uma string com caracteres input_characters, obteremos uma média de sequências de saída number_of_sequences e podemos calcular facilmente quantos dados de entrada estamos perdendo descartando a última sequência
+Se number_of_sequences for igual a 100, significa que podemos perder no máximo um por cento de nosso conjunto de dados, o que é definitivamente aceitável em nosso caso com um conjunto de dados muito grande
+Ao mesmo tempo, isso garante que não introduzamos um viés cortando a maioria dos finais de arquivo
+Usando esta abordagem, podemos ter uma restrição no número máximo de lotes que perderemos durante o treinamento
+Agora temos tudo o que precisamos para criar nosso IterableDataset, que é uma classe auxiliar fornecida pela tocha, para preparar entradas de comprimento constante para o modelo
+Só precisamos herdar do IterableDataset e configurar a função __iter__ que produz o próximo elemento com a lógica que acabamos de percorrer: Enquanto a prática padrão na biblioteca de transformadores que vimos até agora é usar input_ids e Attention_mask, neste treinamento, temos tomado o cuidado de fornecer apenas sequências do mesmo comprimento máximo (tokens de comprimento_de_sequência)
+A atenção_maskinputégeralmente usada para indicar qual token de entradaéusado quando as entradas são preenchidas até um comprimento máximo, mas são, portanto, supérfluas aqui
+Para simplificar ainda mais o treinamento, não os produzimos
+Vamos testar nosso conjunto de dados iterável: Ótimo, está funcionando como pretendíamos e obtemos boas entradas de comprimento constante para o modelo
+Observe que adicionamos uma operação aleatória ao conjunto de dados
+Como este é um conjunto de dados iterável, não podemos simplesmente embaralhar todo o conjunto de dados no início
+Em vez disso, configuramos um buffer com tamanho buffer_size e carregamos os elementos neste buffer antes de obtermos os elementos do conjunto de dados
+Agora que temos uma fonte de entrada confiável para o modelo, é hora de construir o loop de treinamento real
+Loop de treinamento com AccelerateAgora temos todos os elementos para escrever nosso loop de treinamento
+Uma limitação óbvia de treinar nosso próprio modelo de linguagem são os limites de memória nas GPUs que usaremos
+Neste exemplo usaremos várias GPUs A100 que possuem os benefícios de uma grande memória em cada placa, mas provavelmente você precisará adaptar o tamanho do modelo dependendo das GPUs que usar
+No entanto, mesmo em uma placa gráfica moderna, você não pode treinar um modelo GPT-2 em escala real em uma única placa em tempo razoável
+Neste tutorial, implementaremos o paralelismo de dados que ajudará a utilizar várias GPUs para treinamento
+Não vamos tocar no paralelismo de modelo, que permite distribuir o modelo por várias GPUs
+Felizmente, podemos usar uma biblioteca bacana chamada Accelerate para tornar nosso código escalável
+O Accelerate é uma biblioteca projetada para facilitar o treinamento distribuído e a alteração do hardware subjacente para o treinamento
+O Accelerate fornece uma API fácil para executar scripts de treinamento com precisão mista e em qualquer tipo de configuração distribuída (multi-GPUs, TPUs, etc.
+) enquanto ainda permite que você escreva seu próprio loop de treinamento
+O mesmo código pode então ser executado perfeitamente em sua máquina local para depuração ou em seu ambiente de treinamento
+O Accelerate também fornece uma ferramenta CLI que permite configurar e testar rapidamente seu ambiente de treinamento e, em seguida, iniciar os scripts
+A ideia de acelerar é fornecer um wrapper com a quantidade mínima de modificações, permitindo que seu código seja executado em aceleradores distribuídos, multi-GPUs, de precisão mista e novos como TPUs
+Você só precisa fazer algumas alterações em seu loop de treinamento PyTorch nativo: Em seguida, configuramos o registro para treinamento
+Como treinar um modelo do zero, a execução do treinamento demorará um pouco e será executada em uma infraestrutura cara, por isso queremos garantir que todas as informações relevantes sejam armazenadas e facilmente acessíveis
+Não mostramos a configuração de registro completa aqui, mas você pode encontrar a função setup_logging no script de treinamento completo
+Ele configura três níveis de registro: um Logger python padrão, Tensorboard e Weights & Biases
+Dependendo de suas preferências e caso de uso, você pode adicionar ou remover estruturas de registro aqui
+Ele retorna o logger Python, um gravador Tensorboard, bem como um nome para a execução gerada pelo logger Weights & Biases
+Além disso, configuramos uma função para registrar as métricas com Tensorboard e Pesos e Vieses
+Observe o uso do acelerador
+is_main_processNo final, agrupamos o conjunto de dados em um DataLoader que também lida com o lote
+Accelerate se encarregará de distribuir o dataloader em cada trabalhador e garantirá que cada um receba amostras diferentes
+Outro aspecto que precisamos implementar é a otimização
+Vamos configurar o otimizador e a programação da taxa de aprendizado no loop principal, mas definimos uma função auxiliar aqui para diferenciar os parâmetros que devem receber decaimento de peso
+Ingeneral bias e pesos LayerNorm não estão sujeitos a decaimento de peso
+Por fim, queremos avaliar o modelo no conjunto de validação de tempos em tempos, então vamos configurar uma função de avaliação que podemos chamar que calcula a perda e a perplexidade no conjunto de avaliação: especialmente no início do treinamento, quando a perda ainda é alta, pode acontecer que obter um estouro calculando a perplexidade
+Pegamos esse erro e definimos a perplexidade ao infinito nesses casos
+Agora que temos todas essas funções auxiliares instaladas, estamos prontos para escrever a parte principal do script: Este é um bloco de código e tanto, mas lembre-se de que este é todo o código necessário para treinar um grande modelo de linguagem em uma infraestrutura distribuída
+Vamos desconstruir um pouco o script e destacar as partes mais importantes:Salvamento do modeloAdicionamos o script ao repositório do modelo
+Isso nos permite simplesmente clonar o repositório do modelo em uma nova máquina e ter tudo para começar
+No início, verificamos uma nova ramificação com o run_name que obtemos de Weights & Biases, mas pode ser qualquer nome para este experimento
+Posteriormente, confirmamos o modelo em cada ponto de verificação para o hub
+Com essa configuração, cada experimento está em uma nova ramificação e cada confirmação representa um ponto de verificação do modelo
+Observe que precisamos de await_for_everyone e unwrap_model para garantir que o modelo esteja devidamente sincronizado ao armazená-lo
+OtimizaçãoPara a otimização do modelo, usamos o otimizador AdamW com uma programação de taxa de cosseno após um período de aquecimento linear
+Para os hiperparâmetros, seguimos de perto os parâmetros descritos no documento GPT-39 para modelos de tamanho semelhante
+Avaliação Avaliamos o modelo no conjunto de avaliação sempre que salvamos, ou seja, a cada save_checkpoint_steps e após o treinamento
+Juntamente com a perda de validação, também registramos a perplexidade da validação
+Acumulação de gradiente Como não podemos esperar que um tamanho de lote completo caiba na máquina, mesmo quando executamos isso em uma grande infraestrutura
+Portanto, implementamos a acumulação de gradiente e podemos coletar gradientes de vários passes para trás e otimizar assim que acumularmos etapas suficientes
+Um aspecto que ainda pode ser um pouco obscuro neste ponto é o que realmente significa treinar um modelo em várias GPUs? Existem várias abordagens para treinar modelos de maneira distribuída, dependendo do tamanho do modelo e do volume de dados
+A abordagem utilizada pelo Accelerate é chamada de Paralelismo DataDistributed (DDP)
+A principal vantagem dessa abordagem é que ela permite treinar modelos mais rapidamente com tamanhos de lote maiores que caberiam em qualquer GPU
+O processo é ilustrado na Figura 10-6
+Figura 10-6
+Ilustração das etapas de processamento no Paralelismo distribuído de dados com quatro GPUs
+Vamos percorrer o pipeline passo a passo em:1
+Cada trabalhador consiste em uma GPU e uma fração dos núcleos da CPU
+O carregador de dados prepara um lote de dados e os envia para o modelo
+
+Cada GPU recebe um lote de dados e calcula a perda e seus respectivos gradientes com uma cópia local do modelo

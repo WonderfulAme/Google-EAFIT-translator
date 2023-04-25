@@ -1,0 +1,66 @@
+Capítulo 7
+Lidando com poucos ou sem rótulos UMA OBSERVAÇÃO PARA LEITORES DE LANÇAMENTO ANTERIOR Com os e-books de lançamento antecipado, você obtém os livros em sua forma mais antiga - o conteúdo bruto e não editado do autor conforme eles escrevem - para que você possa aproveitar essas tecnologias muito antes do lançamento oficial desses títulos
+Este será o 7º capítulo do último livro
+Observe que o repositório do GitHub será ativado mais tarde
+Se você tiver comentários sobre como podemos melhorar o conteúdo e/ou os exemplos deste livro, ou se notar falta de material neste capítulo, entre em contato com o editor em mpotter@oreilly
+com
+Há uma pergunta tão profundamente arraigada na mente de todo cientista de dados que geralmente é a primeira coisa que eles perguntam no início de um novo projeto: existe algum dado rotulado? Na maioria das vezes, a resposta é “não” ou “um pouco”, seguida por uma expectativa do cliente de que os sofisticados modelos de aprendizado de máquina de sua equipe ainda devem ter um bom desempenho
+Como os modelos de treinamento em conjuntos de dados muito pequenos geralmente não produzem bons resultados, uma solução óbvia é anotar mais dados
+No entanto, isso leva tempo e pode ser muito caro, especialmente se cada anotação exigir conhecimento de domínio para validar
+Felizmente, existem vários métodos adequados para lidar com poucos ou nenhum rótulo! Você já deve estar familiarizado com alguns deles, como aprendizado de tiro zero ou poucos tiros com a impressionante capacidade do GPT-3 de executar uma gama diversificada de tarefas a partir de apenas algumas dezenas de exemplos.
+Em geral, o método de melhor desempenho dependerá da tarefa, da quantidade de dados disponíveis e de qual fração é rotulada
+Uma árvore de decisão é mostrada na Figura 7-1 para ajudar a nos guiar através do processo
+Figura 7-1
+Várias técnicas que podem ser usadas para melhorar o desempenho do modelo na ausência de grandes quantidades de dados rotulados
+Vamos percorrer esta árvore de decisão passo a passo: Você tem dados rotulados? Mesmo um punhado de amostras rotuladas pode fazer a diferença sobre qual método funciona melhor
+Se você não tiver nenhum dado rotulado, poderá começar com a abordagem de aprendizado zero-shot na SEÇÃO X, que geralmente define uma linha de base forte para trabalhar a partir
+Quantos rótulos? Se os dados rotulados estiverem disponíveis, o fator decisivo é quanto? Se você tiver muitos dados de treinamento disponíveis, poderá usar a abordagem de ajuste fino padrão discutida no Capítulo 2
+Você tem dados não rotulados? Se você tiver apenas um punhado de amostras rotuladas, pode ajudar imensamente se você tiver acesso a grandes quantidades de dados não rotulados
+Se você tiver acesso a dados não rotulados, poderá usá-los para ajustar o modelo de linguagem no domínio antes de treinar um classificador ou usar métodos mais sofisticados, como Universal Data Augmentation (UDA)1 ou Uncertainty-Aware Self-Training (UST)2
+Se você também não tiver dados não rotulados disponíveis, isso significa que você não pode anotar mais dados se quiser
+Nesse caso, você pode usar o aprendizado de poucos tiros ou usar os embeddings de um modelo de linguagem pré-treinado para realizar pesquisas com uma pesquisa de vizinho mais próximo
+Neste capítulo, trabalharemos nessa árvore de decisão abordando um problema comum enfrentado por muitas equipes de suporte que usam rastreadores de problemas como Jira ou GitHub para ajudar seus usuários: marcar problemas com metadados com base na descrição do problema
+Essas tags podem definir o tipo de problema, o produto que está causando o problema ou qual equipe é responsável por lidar com o problema relatado
+A automação desse processo pode ter um grande impacto na produtividade e permite que as equipes de suporte se concentrem em ajudar seus usuários
+Como um exemplo em execução, usaremos os problemas do GitHub associados a um projeto popular de código aberto: Hugging Face Transformers! Vamos agora dar uma olhada em quais informações estão contidas nesses problemas, como enquadrar a tarefa e como obter os dados
+NOTA Os métodos apresentados neste capítulo funcionam bem para classificação de texto, mas outras técnicas, como aumento de dados, podem ser necessárias para lidar com tarefas mais complexas, como reconhecimento de entidade nomeada, resposta a perguntas ou resumo
+Construindo um identificador de problemas do GitHub Se você navegar até a guia Issues do repositório Transformers, encontrará problemas como o mostrado na Figura 7-2, que contém um título, uma descrição e um conjunto de tags ou rótulos que caracterizam o problema
+Isso sugere uma maneira natural de enquadrar a tarefa de aprendizado supervisionado: dado um título e uma descrição de um problema, preveja um ou mais rótulos
+Como cada problema pode receber um número variável de rótulos, isso significa que estamos lidando com um problema de classificação de texto multirótulo
+Esse problema geralmente é mais desafiador do que a configuração multiclasse que encontramos no Capítulo 2, em que cada tweet foi atribuído a apenas uma emoção.
+Figura 7-2
+Um problema típico do GitHub no repositório Transformers
+Agora que vimos como são os problemas do GitHub, vamos ver como podemos baixá-los para criar nosso conjunto de dados
+Obtendo os dados Para obter todos os problemas do repositório, usaremos a API REST do GitHub para pesquisar o endpoint de problemas
+Esse endpoint retorna uma lista de objetos JSON, onde cada elemento contém um grande número de campos sobre o problema, incluindo seu estado (aberto ou fechado), quem abriu o problema, bem como o título, corpo e rótulos que vimos na Figura 7-2
+Para pesquisar o endpoint, você pode executar o seguinte comandocurl para baixar o primeiro problema na primeira página:Como demora um pouco para buscar todos os problemas, incluímos um problema
+jsonlfile no repositório GitHub deste livro, juntamente com uma função fetch_issues para baixá-los você mesmo
+OBSERVAÇÃOA API REST do GitHub trata as solicitações pull como problemas, portanto, nosso conjunto de dados contém uma mistura de ambos
+Para manter as coisas simples, desenvolveremos nosso classificador para ambos os tipos de problemas, embora na prática você possa considerar a construção de dois classificadores separados para ter um controle mais refinado sobre o desempenho do modelo
+Preparando os dados Assim que baixamos todos os problemas, podemos carregá-los usando Pandas: import pandas as Há quase 10.000 problemas em nosso conjunto de dados e, observando uma única linha, podemos ver que as informações recuperadas da API do GitHub contêm muitos campos, como URLs , IDs, datas, usuários, título, corpo, bem como rótulos:As colunas de rótulos são o que nos interessa, e cada linha contém uma lista de objetos JSON com metadados sobre cada rótulo:Para nossos propósitos, estamos interessado apenas no campo de nome de cada objeto de rótulo, então vamos sobrescrever a coluna de rótulos apenas com os nomes dos rótulos: Em seguida, vamos dar uma olhada nos 10 rótulos mais frequentes no conjunto de dados
+No Pandas podemos fazer isso “explodindo” a coluna de rótulos para que cada rótulo na lista se torne uma linha, e então simplesmente contamos a ocorrência de cada rótulo: Podemos ver que existem 65 rótulos únicos no conjunto de dados e que as classes estão muito desbalanceadas , com wontfix e model card sendo os rótulos mais comuns
+Para tornar o problema de classificação mais tratável, vamos nos concentrar na construção de um tagger para um subconjunto dos rótulos
+Por exemplo, alguns rótulos como Good First Issue ou Help Wanted são potencialmente muito difíceis de prever a partir da descrição do problema, enquanto outros, como o modelo de cartão, podem ser classificados com uma regra simples que detecta quando um modelo de cartão é adicionado ao Hugging Face Hub
+O código a seguir mostra o subconjunto de rótulos com os quais trabalharemos, juntamente com uma padronização dos nomes para facilitar a leitura:Agora vamos ver a distribuição dos novos rótulos:tokenizaçãonovo modelomodel treinamentousagepipelinetensorflow ou tf pytorchdocumentaçãoexemplosComo vários rótulos podem ser atribuídos para um único problema, também podemos observar a distribuição de contagens de rótulos: a grande maioria dos problemas não tem nenhum rótulo e apenas um punhado tem mais de um
+Mais adiante neste capítulo, acharemos útil tratar os problemas não rotulados como uma divisão de treinamento separada, então vamos criar uma nova coluna que indique se os problemas não estão rotulados ou não: Vamos agora dar uma olhada em um exemplo: o Google propôs recentemente um novo exemplo, uma nova arquitetura de modelo é proposta, então o novo modeltag faz sentido
+Também podemos ver que o título contém informações que serão úteis para nosso classificador, então vamos concatená-lo com a descrição do problema no campo do corpo: Como fizemos em outros capítulos, é uma boa ideia dar uma olhada rápida no número de palavras em nossos textos para ver se perderemos muitas informações durante a etapa de tokenização: A distribuição tem uma cauda longa característica de muitos conjuntos de dados de texto
+A maioria dos textos são bastante curtos, mas também há problemas com mais de 1.000 palavras
+É comum ter problemas muito longos, especialmente quando mensagens de erro e trechos de código são postados junto com eles
+Criando conjuntos de treinamentoAgora que exploramos e limpamos nosso conjunto de dados, a última coisa a fazer é definir nossos conjuntos de treinamento para comparar nossos classificadores
+Queremos garantir que as divisões sejam balanceadas, o que é um pouco mais complicado para o problema de vários rótulos, porque não há equilíbrio garantido para todos os rótulos
+No entanto, pode ser aproximado e, embora o scikit-learn não suporte isso, podemos usar a biblioteca scikit-multilearn que está configurada para problemas multilabel
+A primeira coisa que precisamos fazer é transformar nosso conjunto de rótulos como pytorch e tokenização em um formato que o modelo possa processar
+Aqui podemos usar a classe Transformer MultiLabelBinarizer do Scikit-Learn, que pega uma lista de nomes de rótulos e cria um vetor com zeros para rótulos ausentes e uns para rótulos presentes
+Podemos testar isso ajustando o MultiLabel Binarizer em all_labels para aprender o mapeamento do nome do rótulo para o ID da seguinte forma: Neste exemplo simples, podemos ver que a primeira linha tem dois correspondentes à tokenização e novos rótulos de modelo, enquanto a segunda linha tem apenas um hit com pytorch
+Para criar as divisões, podemos usar a função iterative_train_test_split, que cria as divisões de treinamento/teste iterativamente para obter rótulos balanceados
+Envolvemos em uma função que podemos aplicar a DataFrames
+Como a função espera uma matriz de recursos bidimensional, precisamos adicionar uma dimensão aos índices possíveis antes de fazer a divisão: Com essa função instalada, podemos dividir os dados em conjuntos de dados supervisionados e não supervisionados e criar conjuntos de treinamento, validação e teste balanceados para a parte supervisionada :Finalmente, vamos criar um DatasetDict com todas as divisões para que possamos tokenizar facilmente o conjunto de dados e integrar com o Trainer
+Aqui, usaremos o elegante conjunto de dados
+função from_pandas de Datasets para carregar cada divisão diretamente do Pandas DataFrame correspondente: Isso parece bom, então a última coisa a fazer é criar algumas fatias de treinamento para que possamos avaliar o desempenho de cada classificador em função do tamanho do conjunto de treinamento
+Criando fatias de treinamento O conjunto de dados tem as duas características que gostaríamos de investigar neste capítulo: dados rotulados esparsos e classificação de vários rótulos
+O conjunto de treinamento consiste em apenas 220 exemplos para treinar, o que certamente é um desafio, mesmo com aprendizado de transferência
+Para detalhar como cada método neste capítulo funciona com poucos dados rotulados, também criaremos fatias dos dados de treinamento com ainda menos amostras
+Podemos então plotar o número de amostras em relação ao desempenho e investigar vários regimes
+Começaremos com apenas 8 amostras por rótulo e aumentaremos até que a fatia cubra todo o conjunto de treinamento usando a função iterative_train_test_split:Ótimo, finalmente preparamos nosso conjunto de dados em divisões de treinamento - vamos dar uma olhada no treinamento de um modelo de linha de base forte!Implementando um BayeslineSempre que você inicia um novo projeto de PNL, é sempre uma boa ideia implementar um conjunto de linhas de base fortes por dois motivos principais:1
+Uma linha de base baseada em expressões regulares, regras criadas manualmente ou um modelo muito simples já pode funcionar muito bem para resolver o problema
+Nesses casos, não há razão para trazer grandes transformadores tipo armas que geralmente são mais complexos de implantar e manter em ambientes de produção
