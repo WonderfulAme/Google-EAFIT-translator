@@ -1,0 +1,587 @@
+Chapter 6. Multilingual Named Entity
+Recognition
+A NOTE FOR EARLY RELEASE READERS
+With Early Release ebooks, you get books in their earliest form—the author’s raw and unedited content as they
+write—so you can take advantage of these technologies long before the official release of these titles.
+This will be the 6th chapter of the final book. Please note that the GitHub repo will be made active later on.
+If you have comments about how we might improve the content and/or examples in this book, or if you notice
+missing material within this chapter, please reach out to the editor at mpotter@oreilly.com.
+So far in this book we have applied Transformers to solve NLP tasks on English corpora, so what do you do when
+your documents are written in Greek, Swahili, or Klingon? One approach is to search the HuggingFace Model Hub
+for a suitable pretrained language model and fine-tune it on the task at hand. However, these pretrained models
+tend to exist only for “high-resource” languages like German, Russian, or Mandarin, where plenty of webtext is
+available for pretraining. Another common challenge arises when your corpus is multilingual – maintaining
+multiple monolingual models in production will not be any fun for you or your engineering team.
+Fortunately, there is a class of multilingual Transformers to the rescue! Like BERT, these models use masked
+language modeling as a pretraining objective, but are trained jointly on texts in over 100 concurrent languages. By
+pretraining on huge corpora across many languages, these multilingual Transformers enable zero-shot crosslingual transfer, where a model that is fine-tuned on one language can be applied to others without any further
+training! This also makes these models well suited for “code-switching”, where a speaker alternates between two
+or more languages or dialects in the context of a single conversation.
+In this chapter we will explore how a single Transformer model called XLM-RoBERTa1 can be fine-tuned to
+perform named entity recognition (NER) across several languages. NER is a common NLP task that identifies
+entities like people, organizations, or locations in text. These entities can be used for various applications such as
+gaining insights from company documents, augmenting the quality of search engines, or simply building a
+structured database from a corpus.
+For this chapter let’s assume that we want to perform NER for a customer based in Switzerland, where there are
+four national languages, with English often serving as a bridge between them. Let’s start by getting a suitable
+multilingual corpus for this problem.
+NOTE
+Zero-shot transfer or zero-shot learning usually refers to the task of training a model on one set of labels and then evaluating it on a different
+set of labels. In the context of Transformers, zero-shot learning may also refer to situations where a language model like GPT-3 is evaluated
+on a downstream task it wasn’t even fine-tuned on!
+
+The Dataset
+In this chapter we will be using a subset of the Cross-lingual TRansfer Evaluation of Multilingual Encoders
+(XTREME)2 benchmark called Wikiann3 or PAN-X. This dataset consists of Wikipedia articles in many
+languages, including the four most commonly spoken languages in Switzerland: German (62.9%), French (22.9%),
+Italian (8.4%), and English (5.9%). Each article is annotated with LOC (location), PER (person) and ORG
+(organization) tags in the “inside-outside-beginning” (IOB2) format, where a B- prefix indicates the beginning of
+
+an entity, and consecutive positions of the same entity are given an I- prefix. An O tag indicates that the token does
+not belong to any entity. For example, the following sentence
+Jeff Dean is a computer scientist at Google in California
+would be labeled in IOB2 format as shown in Table.
+
+To load PAN-X with HuggingFace Datasets we first need to manually download the file AmazonPhotos.zip from
+XTREME’s Amazon Cloud Drive, and place it in a local directory (data in our example). Having done that, we
+can then load a PAN-X corpus using one of the two-letter ISO 639-1 language codes supported in the XTREME
+benchmark (see Table 5 of the paper for a list of the 40 available language codes). For example, to load the
+By design, we have more examples in German than all other languages combined, so we’ll use it as a starting point
+from which to perform zero-shot cross-lingual transfer to French, Italian, and English. Let’s inspect one of the
+examples in the German corpus:
+
+
+As with our previous encounters with Dataset objects, the keys of our example correspond to the column names
+of an Apache Arrow table, while the values denote the entry in each column. In particular, we see that the
+ner_tags column corresponds to the mapping of each entity to an integer. This is a bit cryptic to the human eye,
+so let’s create a new column with the familiar LOC, PER, and ORG tags. To do this, the first thing to notice is that
+our Dataset object has a features attribute that specifies the underlying data types associated with each
+column:
+
+
+
+The Sequence class specifies that the field contains a list of features, which in the case of ner_tags
+corresponds to a list of ClassLabel features. Let’s pick out this feature from the training set as follows:
+
+
+One handy property of the ClassLabel feature is that it has conversion methods to convert from the class name
+to an integer and vice versa. For example, we can find the integer associated with the B-PER tag by using the
+ClassLabel.str2int function as follows:
+
+Similarly, we can map back from an integer to the corresponding class name:
+
+
+Let’s use the ClassLabel.int2str function to create a new column in our training set with class names for
+each tag. We’ll use the Dataset.map function to return a dict with the key corresponding to the new column
+name and the value as a list of class names:
+
+Now that we have our tags in human-readable format, let’s see how the tokens and tags align for the first example
+in the training set:
+
+The presence of the LOC tags make sense since the sentence “2,000 Einwohnern an der Danziger Bucht in der
+polnischen Woiwodschaft Pommern” means “2,000 inhabitants at the Gdansk Bay in the Polish voivodeship of
+
+Pomerania” in English, and Gdansk Bay is a bay in the Baltic sea, while “voivodeship” corresponds to a state in
+Poland.
+As a sanity check that we don’t have any unusual imbalance in the tags, let’s calculate the frequencies of each
+entity across each split:
+
+This looks good - the distribution of the PER, LOC, and ORG frequencies are roughly the same for each split, so
+the validation and test sets should provide a good measure of our NER tagger’s ability to generalize. Next, let’s
+look at a few popular multilingual Transformers and how they can be adapted to tackle our NER task.
+
+Multilingual Transformers
+Multilingual Transformers involve similar architectures and training procedures as their monolingual counterparts,
+except that the corpus used for pretraining consists of documents in many languages. A remarkable feature of this
+approach is that despite receiving no explicit information to differentiate among the languages, the resulting
+linguistic representations are able to generalize well across languages for a variety of downstream tasks. In some
+cases, this ability to perform cross-lingual transfer can produce results that are competitive with monolingual
+models, which circumvents the need to train one model per language!
+To measure the progress of cross-lingual transfer for NER, the CoNLL-2002 and CoNLL-2003 datasets are often
+used as a benchmark for English, Dutch, Spanish, and German. This benchmark consists of news articles annotated
+with the same LOC, PER, and ORG categories as PAN-X, but contains an additional MISC label for miscellaneous
+entities that do not belong to the previous three groups. Multilingual Transformer models are then evaluated in
+three different ways:
+en
+Fine-tune on the English training data and then evaluate on each language’s test set.
+each
+Fine-tune and evaluate on monolingual training data to measure per-language performance.
+all
+
+Fine-tune on all the training data to evaluate multilingual learning.
+We will adopt a similar evaluation strategy for our NER task and we’ll use XLM-RoBERTa (or XLM-R for short)
+which, as of this book’s writing, is the current state-of-the-art Transformer model for multilingual applications. But
+first, let’s take a look at the two models that inspired its development: mBERT and XLM.
+
+Multilingual BERT was developed by the authors of BERT from Google Research in 2018 and was the
+first multilingual Transformer model. It has the same architecture and training procedure as BERT, except that the
+pretraining corpus consists of Wikipedia articles from 104 languages. The tokenizer is also WordPiece, but the
+vocabulary is learnt from the whole corpus so that the model can share embeddings across languages.
+To handle the fact that each language’s Wikipedia dump can vary greatly in size, the data for pretraining and
+learning the WordPiece vocabulary is weighted with an exponential smoothing function that down-samples highresource languages like English and up-samples low-resource languages likes Burmese.
+
+XLM
+In the Cross-lingual Language Model Pretraining paper, Guillaume Lample and Alexis Conneau from Facebook
+AI Research investigated three pretraining objectives for cross-lingual language (XLM) models. One of these
+objectives is the masked language modeling (MLM) objective from BERT, but instead of receiving complete
+sentences as input, XLM receives sentences that can be truncated arbitrarily (there is also no next-sentence
+prediction task). To increase the number of tokens associated with low-resource languages, the sentences are
+sampled from a monolingual corpus
+according to the multinomial distribution, with probabilities
+ and n is the number of sentences in a monolingual corpus C . Another difference from BERT is the
+use of Byte-Pair-Encoding instead of WordPiece for tokenization, which the authors observe improves the
+alignment of the language embeddings across languages. The paper also introduces translation language
+modelling (TLM) as a new pretraining objective, which concatenates pairs of sentences from two languages and
+randomly masks the tokens as in MLM. To predict a masked token in one language, the model can attend to tokens
+in the translated pair which encourages the alignment of the cross-lingual representations. A comparison of the two
+methods is shown in Figure 
+
+The MLM (top) and TLM (bottom) pretraining objectives of XLM. Figure from the XLM paper.
+
+NOTE
+There are several variants of XLM based on the choice of pretraining objective and number of languages to be trained on. For the purposes
+of this discussion, we’ll use XLM to denote the model trained on the same 100 languages used for mBERT.
+
+Like its predecessors, XLM-R uses MLM as a pretraining objective for 100 languages, but, as shown in Figure 62, is distinguished by the huge size of the corpus used for pretraining: Wikipedia dumps for each language and 
+terabytes of Common Crawl data from the web. This corpus is several orders of magnitude larger than the ones
+used in previous models and provides a significant boost in signal for low-resource languages like Burmese and
+Swahili, where only a small number of Wikipedia articles exist.
+
+Amount of data for the languages that appear in both the Wiki-100 corpus used for mBERT and XLM, and the CommonCrawl corpus used
+for XLM-R. Figure from the XLM paper.
+
+The RoBERTa part of the model’s name refers to the fact that the pretraining approach is the same as monolingual
+RoBERTa models. In the RoBERTa paper,5 the authors improved on several aspects of BERT, in particular by
+removing the next sentence prediction task altogether. XLM-R also drops the language embeddings used in XLM
+and uses SentencePiece6 to tokenize the raw texts directly. Besides its multilingual nature, a notable difference
+between XLM-R and RoBERTa is the size of the respective vocabularies: 250,000 tokens versus 55,000!
+The Table 6-2 summarizes the main architectural differences between all the multilingual Transformers.
+
+The performance of mBERT and XLM-R on the CoNLL benchmark is also shown in Figure 6-3. We see that when
+trained on all the languages, the XLM-R models significantly outperform mBERT and earlier state-of-the-art
+approaches.
+
+F1-scores on the CoNLL benchmark for NER. Figure from the XLM paper.
+
+From this research it becomes apparent that XLM-R is the best choice for multilingual NER. In the next section we
+explore how to fine-tune XLM-R for this task on a new dataset.
+
+Training a Named Entity Recognition Tagger
+In Chapter 2, we saw that for text classification, BERT uses the special [CLS] token to represent an entire
+sequence of text. As shown in the left diagram of Figure 6-4, this representation is then fed through a fullyconnected or dense layer to output the distribution of all the discrete label values. BERT and other encoder
+Transformers take a similar approach for NER, except that the representation of every input token is fed into the
+same fully-connected layer to output the entity of the token. For this reason, NER is often framed as a token
+classification task and the process looks something like the right diagram.
+So far, so good, but how should we handle subwords in a token classification task? For example, the last name
+“Sparrow” in Figure is tokenized by WordPiece into the subwords “Spa” and “row”, so which one (or both)
+should be assigned the I-PER label?
+In the BERT paper, the authors used the representation from first subword and this is
+the convention we’ll adopt here. Although we could have chosen to include the representation from the
+subword by assigning it a copy of the I-LOC label, this introduces extra complexity when subwords are associated
+with a entity because then we need to copy these tags and this violates the IOB2 format.
+
+Fine-tuning BERT for text classification (left) and named entity recognition (right).
+
+Fortunately, all this intuition from BERT carries over to XLM-R since the architecture is based on RoBERTa,
+which is identical to BERT! However, there are some slight differences, especially around the choice of tokenizer.
+Let’s see how the two differ.
+
+SentencePiece Tokenization
+Instead of using a WordPiece tokenizer, XLM-R uses a tokenizer called SentencePiece that is trained on the raw
+text of all 100 languages. The SentencePiece tokenizer is based on a type of subword segmentation called Unigram
+and encodes input text as a sequence of Unicode characters. This last feature is especially useful for multilingual
+corpora since it allows SentencePiece to be agnostic about accents, punctuation, and the fact that many languages
+like Japanese do not have whitespace characters.
+To get a feel for how SentencePiece compares to WordPiece, let’s load the BERT and XLM-R tokenizers in the
+usual way with Transformers:
+
+
+Here we see that instead of the [CLS] and [SEP] tokens that BERT uses for sentence classification tasks, XLMR uses  and to denote the start and end of a sequence. Another special feature of SentencePiece is that it
+treats raw text as a sequence of Unicode characters, with whitespace given the Unicode symbol U+2581 or _
+character. By assigning a special symbol for whitespace, SentencePiece is able to detokenize a sequence without
+ambiguities. In our example above, we can see that WordPiece has lost the information that there is no whitespace
+between “York” and. By contrast, SentencePiece preserves the whitespace in the tokenized text so we can
+convert back to the raw text without ambiguity:
+
+
+Now that we understand how SentencePiece works, let’s see how we can encode our simple example in a form
+suitable for NER. The first thing to do is load the pretrained model with a token classification head. But instead of
+loading this head directly from the Transformers library we will build it ourselves! By diving deeper into the
+Transformers API, let’s see how we can do this with just a few steps.
+
+The Anatomy of the Transformers Model Class
+As we have seen in previous chapters, the Transformers library is organized around dedicated classes for each
+architecture and task. The list of supported tasks can be found in the Transformers documentation, and as of this
+book’s writing includes
+
+and the associated classes are named according to a ModelNameForTask convention. Most of the time, we load
+these models using the ModelNameForTask.from_pretrained function and since the architecture can
+usually be guessed from the name alone, Transformers provides a convenient set
+
+of AutoClasses to automatically load the relevant configuration, vocabulary, or weights. In practice, these
+AutoClasses are extremely useful because it means that we can switch to a completely different architecture in our
+experiments by simply changing the model name!
+However, this approach has its limitations, and to motivate going deeper in the Transformers API consider the
+following scenario. Suppose you work for a consulting company that is engaged with many customer projects each
+year. By studying how these projects evolve, you’ve noticed that the initial estimates for person-months, number of
+required people, and the total project timespan are extremely inaccurate. After thinking about this problem, you
+have the idea that feeding the written project descriptions to a Transformer model might yield much better
+estimates of these quantities.
+So you set up a meeting with your boss and, with an artfully crafted Powerpoint presentation, you pitch that you
+could increase the accuracy of the project estimates and thus increase the efficiency of the staff and revenue by
+making more accurate offers. Impressed with your colorful presentation and talk of efficiency and profits, your
+boss generously agrees to give you one week to build a proof-of-concept. Happy with the outcome, you start
+working straight away and decide that the only thing you need is regression model to predict the three variables
+(person-months, number of people, and timespan). You fire up your favorite GPU and open a notebook. You
+execute from transformers import BertForRegression and color escapes your face as dreaded red
+color fills your screen: ImportError: cannot import name 'BertForRegression'. Oh no, there
+is no BERT model for regression! How should you complete the project in one week if you have to implement the
+whole model yourself?! Where should you even start?
+Don’t panic! The Transformers library is designed to enable you the easily extend existing models for your
+specific use-case. With it you have access to various utilities such as loading weights of pretrained models or task
+specific helper functions. This lets you build custom models for specific objectives with very little overhead.
+
+Bodies and Heads
+The main concept that makes Transformers so versatile is the split of the architecture into a body and head. We
+have already seen that when we switch from the pretraining task to the downstream task, we need to replace the
+last layer of the model with one that is suitable for the task. This last layer is called the model head and is the part
+that is task specific. The rest of the model is called the body and includes the token embeddings and Transformer
+layers that are task agnostic. This structure is reflected in the Transformers code as well: The body of a model is
+implemented in a class such as BertModel or GPT2Model that returns the hidden states of the last layer. Task
+specific models such as BertForMaskedLM or BertForSequenceClassification use the base model
+and add the necessary head on top of the hidden states as shown in figure Figure.
+
+The BertModel class only contains the body of the model while the BertForTask classes combine the body with a dedicated head for a
+given task.
+
+Creating Your Own XLM-R Model for Token Classification
+This separation of bodies and heads allows us to build a custom head for any task and just mount it on top of a
+pretrained model! Let’s go through the exercise of building a a custom token classification head for XLM-R. Since
+XLM-R uses the same model architecture as RoBERTa, we will use RoBERTa as the base model, but augmented
+with settings specific to XLM-R.
+
+To get started we need a data structure that will represent our XLM-R NER tagger. As a first guess, we’ll need a
+configuration file to initialize the model and a forward function to generate the outputs. With these
+considerations, let’s go ahead and build our XLM-R class for token classification:
+
+The config_class ensures that the standard XLM-R settings are used when we initialize a new model. If you
+want to change the default parameters you can do this by overwriting the default settings in the configuration. With the super() function we call the initialization function of RobertaPreTrainedModel. Then we define our
+model architecture by taking the model body from RobertaModel and extending it with our own classification
+head consisting of a dropout and a standard feedforward layer. Finally, we initialize all the weights by calling the function which will load the pretrained weights for the model body and randomly initialize the
+weights of our token classification head.
+The only thing left to do is to define what the model should do in a forward pass. We define the following behavior
+in the forward function:
+
+During the forward pass the data is first fed through the model body. There are a number of input variables, but the
+important ones you should recognize are the input_ids and attention_masks which are the only ones we
+need for now. The hidden state, which is part of the model body output, is then fed through the dropout and
+classification layer. If we also provide labels in the forward pass we can directly calculate the loss. If there is an
+attention mask we need to do a little bit more work to make sure we only calculate the loss of the unmasked
+
+tokens. Finally, we wrap all the outputs in a TokenClassifierOutput object that allows us to access
+elements in a the familiar named tuple from previous chapters.
+The only thing left to do is updating the placeholder function in the model class with our freshly baked functions:
+
+Looking back at the example of the triple regression problem at the beginning of this section we now see that we
+can easily solve this by adding a custom regression head to the model with the necessary loss function and still
+have a chance at meeting the challenging deadline.
+
+Now we are ready to load our token classification model. Here we need to provide some additional information
+beyond the model name, including the tags that we will use to label each entity and the mapping of each tag to an
+ID and vice versa. All of this information can be derived from our tags variable, which as a ClassLabel
+object has a names attribute that we can use to derive the mapping:
+
+With this information and the attribute, we can load the XLM-R configuration for
+NER as follows.
+
+Now, we can load the model weights as usual with the function. Note that we did not
+implement this ourselves. we get this for free by inheriting from RobertaPreTrainedModel:
+
+As a sanity check that we have initialized the tokenizer and model correctly, let’s test the predictions on our small
+
+As we can see, the start and end tokens are given the IDs 0 and 2 respectively. For reference we can
+find the mappings of the other special characters.
+
+
+Finally, we need to pass the inputs to the model and extract the predictions by taking the argmax to get the most
+likely class per token.
+
+
+Unsurprisingly, our token classification layer with random weights leaves a lot to be desired; let’s fine-tune on
+some labeled data to make it better! Before doing so, let’s wrap the above steps into a helper function for later use.
+
+Tokenizing and Encoding the Texts
+Now that we’ve established that the tokenizer and model can encode a single example, our next step is to tokenize
+the whole dataset so that we can pass it to the XLM-R model for fine-tuning. As we saw in Chapter 2, Datasets
+
+provides a fast way to tokenize a Dataset object with the Dataset.map operation. To achieve this, recall that
+we first need to define a function with the minimal signature
+
+where examples is equivalent to a slice of a Dataset. Since the XLM-R
+tokenizer returns the input IDs for the model’s inputs, we just need to augment this information with the attention
+mask and the label IDs that encode the information about which token is associated with each NER tag.
+Following the approach taken in the Transformers documentation, let’s look at how this works with our single
+German example by first collecting the words and tags as ordinary lists:
+
+Next we tokenize each word and use the is_split_words argument to tell the tokenizer that our input
+sequence has already been split into words:
+
+
+Here we can see that word_ids has mapped each subword to the corresponding index in the words sequence, so
+the first subword is assigned the index, while and “n” are assigned the index 1 since
+“Einwohnern” is the second word in words. We can also see that special tokens like <s> and <\s> are mapped
+to None. Let’s set -100 as the label for these special tokens and the subwords we wish to mask during training:
+
+
+NOTE
+Why did we choose -100 as the ID to mask subword representations? The reason is that in PyTorch the cross entropy loss class
+
+and so we can use it to ignore the tokens associated with consecutive subwords.
+
+And that’s it! We can clearly see how the label IDs align with the tokens, so let’s scale this out to the whole dataset
+by defining a single function that wraps all the logic.
+
+Next let’s verify whether our function works as expected on a single training example.
+
+First, we should be able to decode the training example from the input_ids.
+
+Good, the decoded output from the tokenizer makes sense and we can see the appearance of the special tokens
+<s> and </s> for the start and end of the sentence. Next let’s check that the label IDs are implemented correctly
+by filtering out the padding label IDs and mapping back from ID to tag.
+
+
+We now have all the ingredients we need to encode each split, so let’s write a function we can iterate over:
+def encode_panx_dataset(corpus).
+
+
+Performance Measures.
+Evaluating NER taggers is similar to other classification tasks and it is common to report results for precision,
+recall, and F -score. The only subtlety is that all words of an entity need to be predicted correctly in order to be
+counted as a correct prediction. Fortunately there is a nifty library called seqeval that is designed for these kind of tasks. As we can see, seqeval expects the predictions and labels as a list of lists, with each list corresponding to a single example in our validation or test sets. To integrate these metrics during training we need a function that can take the outputs of the model and convert them into the lists that seqeval expects. The following does the trick by ensuring we ignore the label IDs associated with subsequent subwords.
+
+We now have all the ingredients to fine-tune our model. Our first strategy will be to fine-tune our base model on
+the German subset of PAN-X and then evaluate it’s zero-shot cross-lingual performance on French, Italian, and
+English. As usual, we’ll use the Transformers Trainer to handle our training loop, so first we need to define the
+training attributes using the TrainingArguments class.
+Here we evaluate the model’s predictions on the validation set at the end of every epoch, tweak the weight decay,
+and set save_steps to a large number to disable checkpointing and thus speed-up training.
+We also need to tell the Trainer how to compute metrics on the validation set, so here we can use the
+align_predictions function that we defined earlier to extract the predictions and labels in the format needed
+by seqeval to calculate the F -score.
+
+The final step is to define a data collator so we can pad each input sequence to the largest sequence length in a
+batch. Transformers provides a dedicated data collator for token classification which will also pad the label
+sequences along with the inputs.
+
+Let’s pass all this information together with the encoded encoded datasets to the Trainer.
+
+Now that the model is fine-tuned, it’s a good idea to save the weights and tokenizer so we can reuse them at a later
+As a sanity check the our model works as expected, let’s test it on the German translation of our simple example.
+
+It works! But we should never get too confident about performance based on a single example. Instead we should
+conduct a proper and thorough investigations of the model’s errors. In the next section we explore how to do this
+for the NER task.
+
+Before we dive deeper into the multilingual aspects of XLM-R let’s take a minute to investigate the errors of our
+model. As we saw in Chapter 2, a thorough error analysis of your model is one of the most important aspects when
+training and debugging Transformers (and machine learning models in general). There are several failure modes
+where it might look like the model is performing well while in practice it has some serious flaws. Examples where
+Transformers can fail include.
+We can accidentally mask too many tokens and also mask some of our labels to get a really promising loss
+drop.
+The compute_metrics function can have a bug that overestimates the true performance.
+We might include the zero class or O entity in NER as a normal class which will heavily skew the
+accuracy and F -score since it is the majority class by a large margin.
+
+When the model performs much worse than expected, looking at the errors can also yield useful insights and reveal
+bugs which would be hard to spot by just looking at the code. Even if the model performs well and there are no bugs in the code, error analysis is still a useful tool to understand the strength and weaknesses of the model. These are aspects we always need to keep in mind when we deploy a model in a production environment.
+We will again use one of the most powerful tools at our disposal which is to look at the validation examples with
+highest loss. We can reuse much of the function we built to analyze the sequence classification model in Chapter 2
+but in contrast we now calculate a loss per token in the sample sequence.
+
+and define a function that we can iterate over the validation set.
+
+The tokens and the labels are still encoded with their IDs, so let’s map the tokens and labels back to strings to
+make it easier to read the results. For the padding tokens with label -100 we assign a special label IGN so we can
+filter them later.
+
+Each column contains a list of tokens, labels, predicted labels, and so on for each sample. Let’s have a look at the tokens individually by unpacking these lists. The pandas.Series.explode function allows us to do exactly
+that in one line by creating a row for each element in the original rows list. Since all the lists in one row have the
+same length we can do this in parallel for all columns. We also drop the padding tokens since their loss is zero
+anyway.
+
+With the data in this shape we can now group it by the input tokens and aggregate the losses for each token with
+the count, mean, and sum. Finally, we sort the aggregated data by the sum of the losses and see which tokens have
+accumulated most loss in the validation set.
+
+We can observe several patterns in this list:
+The whitespace token has the highest total loss which is not surprising since it is also the most common
+token in the list. On average it seems to be well below most tokens in the list.
+Words like in, von, der, and und appear relatively frequently. They often appear together with named
+entities and are sometimes part of them which explains why the model might mix them up.
+Parentheses, slashes, and capital letters at the beginning of words are rarer but have a relatively high
+average loss. We will investigate them further.
+At the end of list we see some subwords that appear rarely but have a very high average loss. For example
+_West shows that these tokens appear in almost any class, and thus pose a classification challenge to the
+model.
+
+
+We can break this down further by plotting the confusion matrix of the token classification, where we see that the
+beginning of an organization is often confused with the subsequent I-ORG token.
+
+Now that we’ve examined the errors at the token level let’s move on and look at sequences with high losses. For
+this calculation, we revisit “unexploded” DataFrame and calculate the total loss by summing over the loss per
+token. To do this let’s first write a function that helps us display the token sequence with the labels and the losses.
+
+It is apparent that something is wrong with the labels of these samples; for example, the United Nations is labeled
+as a person! It turns out the annotations for the Wikiann dataset were generated through an automated process.
+Such annotations are often referred to as “silver-standard” (in contrast to the “gold-standard” of human-generated
+annotations), and it is no surprise that there are cases where the automated approach failed to produce sensible
+labels. However, such failure modes are not unique to automatic approaches; even when humans carefully annotate
+data, mistakes can occur when the concentration of the annotators fades or they simply misunderstood the
+sentence.
+Another thing we noticed when looking at the tokens with the most loss were the parentheses and slashes. Lets
+look at a few examples of sequences with an opening parenthesis.
+
+Since Wikiann is a dataset created from Wikipedia, we can see that the entities contain parentheses from the
+introductory sentence of each article where the name of the article is described. In the first example, the
+parenthesis simply states that the Hama is an “Unternehmen” or company in English. In general we would not
+include the parenthesis and its content as part of the named entity but this seems to be the way the automatic
+extraction annotated the documents. In the other examples the parenthesis contains a geographic specification.
+While this is indeed a location as well we might want disconnect them from the original location in the
+annotations. These are important details to know when we roll-out the model since it might have implication on the
+downstream performance of the whole pipeline the model is part of.
+With a relatively simple analysis we found weaknesses in both our model and the dataset. In a real use-case we
+would iterate on this step and clean up the dataset, re-train the model and analyze the new errors until we are
+satisfied with the performance.
+Now we analysed the errors on a single language but we are also interested in the performance across the
+languages. In the next section we perform some experiments to see how well the cross-lingual transfer in XLM-R
+works.
+
+Now that we have fine-tuned XLM-R on German, we can evaluate its ability to transfer to other languages via the
+Trainer.predict function that generates predictions on Dataset objects. For example, to get the
+predictions on the validation set we can run the following.
+
+The output of Trainer.predict is a trainer_utils.PredictionOutput object which contains
+arrays of predictions and label_ids, along with the metrics we passed to the trainer. For example, the
+metrics on the validation set can be accessed as follows.
+
+The predictions and label IDs are not quite in a form suitable for seqeval’s classification report, so let’s align them
+using our align_predictions function and print out the classification report with the following function.
+
+
+To keep track of our performance per language, our function also returns the micro-averaged F -score. Let’s use
+this function to examine the performance on the test set and keep track of our scores in a dict.
+These are pretty good results for a NER task. Our metrics are in the ballpark of 85% and we can see that the model
+seems to struggle the most on the ORG entities, probably because ORG entities are the least common in the
+training data and many organization names are rare in XLM-R’s vocabulary. How about on other languages? To
+warm up, let’s see how our model fine-tuned on German fares on French.
+Not bad! Although the name and organization are the same in both languages, the model did manage to correctly
+label the French translation of “Kalifornien”. Next, let’s quantify how well our German model fares on the whole
+French test set by writing a simple function that encodes a dataset and generates the classification report on it.
+
+
+Although we see a drop of about 15 points in the micro-averaged metrics, remember that our model has not seen a
+single labeled French example! In general, the size of the performance drop is related to how “far away” the languages are from each other. Although German and French are grouped as Indo-European languages, they
+technically belong to the different languages families of “Germanic” and “Romance” respectively.
+Next, let’s evaluate the performance on Italian. Since Italian is also a Romance language, we expect to get a
+similar result as we found on French.
+
+
+Indeed, our expectations are borne out by the macro-averaged metrics. Finally, let’s examine the performance on
+English which belongs to the Germanic language family.
+Surprisingly, our model fares worst on English even though we might intuitively expect German to be more similar
+than French. Let’s next examine the trade-offs between zero-shot cross-lingual transfer and fine-tuning directly on
+the target language.
+
+When Does Zero-Shot Transfer Make Sense?
+So far we’ve seen that fine-tuning XLM-R on the German corpus yields an F -score of around 85%, and without
+any additional training is able to achieve modest performance on the other languages in our corpus. The question
+is: how good are these results and how do they compare against an XLM-R model fine-tuned on a monolingual
+corpus?
+In this section we will explore this question for the French corpus by fine-tuning XLM-R on training sets of
+increasing size. By tracking the performance this way, we can determine at which point zero-shot cross-lingual
+transfer is superior, which in practice can be useful for guiding decisions about whether to collect more labeled
+data.
+Since we want to train several models, we’ll use the model_init feature of the Trainer class so that we can
+instantiate a fresh model with each call to Trainer.train.
+For simplicity, we’ll also keep the same hyperparameters from the fine-tuning run on the German corpus, except
+that we’ll tweak TrainingArguments.logging_steps to account for the changing training set sizes. We can wrap this altogether in a simple function that takes a DatasetDict object corresponding to a monolingual
+corpus, downsamples it by num_samples, and fine-tunes XLM-R on that sample to return the metrics from the
+best epoch.
+
+As we did with fine-tuning on the German corpus, we also need to encode the French corpus into input IDs,
+attention masks, and label IDs.
+
+We can see that with only 250 examples, fine-tuning on French under-performs the zero-shot transfer from German
+by a large margin. Let’s now increase our training set sizes to 500, 1,000, 2,000, and 4,000 examples to get an idea of how the performance increases.
+We can compare how fine-tuning on French samples compares to zero-shot cross-lingual transfer from German by
+plotting the F -scores on the test set as a function of increasing training set size.
+
+From the plot we can see that zero-shot transfer remains competitive until about 750 training examples, after
+which fine-tuning on French reaches a similar level of performance to what we obtained when fine-tuning on
+German. Nevertheless, this result is not to be sniffed at! In our experience, getting domain experts to label even hundreds of documents can be costly; especially for NER where the labeling process is fine-grained and time
+consuming.
+There is one final technique we can try to evaluate multilingual learning: fine-tune on multiple languages at once!
+Let’s see how we can do this in the next section.
+
+Fine-tuning on Multiple Languages at Once
+So far we’ve seen that zero-shot cross-lingual transfer from German to French or Italian produces a drop of around
+15 points in performance. One way to mitigate this is by fine-tuning on multiple languages at the same time! To
+see what type of gains we can get, let’s first use the concatenate_datasets function from Datasets to
+concatenate the German and French corpora together.
+
+
+This model gives a similar F -score to our first model that was fine-tuned on German. How does it fare with crosslingual transfer? First, let’s examine the performance on Italian.
+
+Wow, this is a 10 point improvement compared to our German model which scored an F -score of around 70% on
+Italian! Given the similarities between French and Italian, this is perhaps not so surprising; how does the model
+perform on English?
+
+
+Here we also have a significant boost in zero-shot performance by 7-8 points, with most of the gain coming from a
+dramatic improvement of the PER tokens! Apparently the Norman conquest of 1066 left a long-lasting effect on
+the English language.
+Let’s round out our analysis by comparing the performance of fine-tuning on each language separately against
+multilingual learning on all the corpora. Since we have already fine-tuned on the German corpus, we can fine-tune
+on the remaining languages with our train_on_subset function, but where num_samples is equal to the
+number of examples in the training set.
+Now that we’ve fine-tuned on each language’s corpus, the next step is to concatenate all the splits together to
+create a multilingual corpus of all four languages. As we did with the previous German and French analysis, we
+can use our concatenate_splits function to do this step for us on the list of coropora we generate in the
+previous step.
+
+The final step is generate the predictions from the trainer on each language’s test set. This will give us an insight
+into how well multilingual learning is really working. We’ll collect the F -scores in our f1_scores dictionary
+and then create a DataFrame that summarizes the main results from our multilingual experiments:
+
+
+From these results we can draw a few general conclusions.
+Multilingual learning can provide significant gains in performance, especially if the low-resource
+languages for cross-lingual transfer belong to similar language families. In our experiments we can see
+that German, French, and Italian achieve similar performance in the all category suggesting that these
+languages are more similar to each other than English.
+As a general strategy, it is a good idea to focus attention on cross-lingual transfer within language
+families, especially when dealing with different scripts like Japanese.
+
+Building a Pipeline for Inference
+Although the Trainer object is useful for training and evaluation, in production we would like to be able to pass
+raw text as input and receive the model’s predictions as output. Fortunately, there is a way to do that using the
+Transformers pipeline abstraction!
+For named entity recognition, we can use the TokenClassificationPipeline so we just need to load the
+model and tokenizer and wrap them as follows.
+
+By inspecting the output we see each word is given both a predicted entity, confidence score, and indices to locate
+it in the span of text.
+
+Conclusion.
+In this chapter we saw how one can tackle NLP task on a multilingual corpus using a single Transformer
+pretrained on 100 languages: XLM-R. Although we were able to show that cross-lingual transfer from German to
+French is competitive when only a small number of labeled examples are available for fine-tuning, this good
+performance generally does not occur if the target language is significantly different from German or was not one
+of the 100 languages used during pretraining. For such cases, poor performance can be understood from a lack of
+model capacity in both the vocabulary and space of cross-lingual representations. Recent proposals like MAD-X8
+are designed precisely for these low-resource scenarios, and since MAD-X is built on top of Transformers you can
+easily adapt the code in this chapter to work with it!
+In this chapter we saw that cross-lingual transfer helps improve the performance on tasks in a langauge where label
+are scarce. In the next chapter we will see how we can deal with few labels in cases where we can’t use crosslingual transfer, for example if there is no language with many labels.
