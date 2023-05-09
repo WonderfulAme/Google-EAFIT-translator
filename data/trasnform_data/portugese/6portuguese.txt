@@ -1,0 +1,304 @@
+Capítulo 6
+Entidade Nomeada Multilíngue
+UMA OBSERVAÇÃO PARA LEITORES DE LANÇAMENTOS ANTECIPADOS
+Com os e-books de lançamento antecipado, você obtém os livros em sua forma mais antiga - o conteúdo bruto e não editado do autor enquanto eles escrevem - para que você possa aproveitar essas tecnologias muito antes do lançamento oficial desses títulos
+Este será o 6º capítulo do último livro
+Observe que o repositório do GitHub será ativado mais tarde
+Se você tiver comentários sobre como podemos melhorar o conteúdo e/ou os exemplos deste livro, ou se notar falta de material neste capítulo, entre em contato com o editor
+Até agora neste livro, aplicamos Transformers para resolver tarefas de PNL em corpora em inglês, então o que você faz quando seus documentos são escritos em grego, suaíli ou klingon? Uma abordagem é pesquisar o HuggingFace Model Hub para um modelo de linguagem pré-treinado adequado e ajustá-lo na tarefa em questão
+No entanto, esses modelos pré-treinados tendem a existir apenas para idiomas de “alto recurso” como alemão, russo ou mandarim, onde há bastante texto da web disponível para pré-treinamento
+Outro desafio comum surge quando seu corpus é multilíngue – manter vários modelos monolíngues na produção não será divertido para você ou sua equipe de engenharia
+Felizmente, existe uma classe de Transformers multilíngues para o resgate! Como o BERT, esses modelos usam modelagem de linguagem mascarada como objetivo de pré-treinamento, mas são treinados em conjunto em textos em mais de 100 idiomas simultâneos
+Através do pré-treinamento em grandes corpora em vários idiomas, esses Transformers multilíngues permitem a transferência crosslingual instantânea, onde um modelo que é ajustado em um idioma pode ser aplicado a outros sem nenhum treinamento adicional! Isso também torna esses modelos adequados para “troca de código”, onde um falante alterna entre dois ou mais idiomas ou dialetos no contexto de uma única conversa
+Neste capítulo, exploraremos como um único modelo de Transformer chamado XLM-RoBERTa1 pode ser ajustado para executar o reconhecimento de entidade nomeada (NER) em vários idiomas
+NER é uma tarefa NLP comum que identifica entidades como pessoas, organizações ou locais em texto
+Essas entidades podem ser usadas para várias aplicações, como obter insights de documentos da empresa, aumentar a qualidade dos mecanismos de pesquisa ou simplesmente construir um banco de dados estruturado a partir de um corpus
+Para este capítulo, vamos supor que queremos executar o NER para um cliente com sede na Suíça, onde existem quatro idiomas nacionais, com o inglês servindo frequentemente como uma ponte entre eles
+Vamos começar obtendo um corpus multilíngue adequado para este problema
+NOTA Transferência zero-shot ou aprendizado zero-shot geralmente se refere à tarefa de treinar um modelo em um conjunto de rótulos e, em seguida, avaliá-lo em um conjunto diferente de rótulos
+No contexto dos Transformers, o aprendizado zero-shot também pode se referir a situações em que um modelo de linguagem como o GPT-3 é avaliado em uma tarefa downstream para a qual nem foi ajustado! O conjunto de dados Neste capítulo, usaremos um subconjunto do benchmark Cross-lingual TRansfer Evaluation of Multilingual Encoders (XTREME)2 chamado Wikiann3 ou PAN-X
+Este conjunto de dados consiste em artigos da Wikipédia em vários idiomas, incluindo os quatro idiomas mais falados na Suíça
+Cada artigo é anotado com as tags LOC (local), PER (pessoa) e ORG (organização) no formato “inside-outside-beginning” (IOB2), onde um prefixo B- indica o início de uma entidade e posições consecutivas de a mesma entidade recebe um prefixo I-
+Uma tag O indica que o token não pertence a nenhuma entidade
+Por exemplo, a seguinte frase Jeff Dean é um cientista da computação no Google na Califórnia seria rotulada no formato IOB2 conforme mostrado na Tabela
+Para carregar o PAN-X com conjuntos de dados HuggingFace, primeiro precisamos baixar manualmente o arquivo AmazonPhotos.zip do Amazon Cloud Drive do XTREME e colocá-lo em um diretório local (dados em nosso exemplo)
+Feito isso, podemos carregar um corpus PAN-X usando um dos códigos de idioma ISO 639-1 de duas letras suportados no benchmark XTREME (consulte a Tabela 5 do artigo para obter uma lista dos 40 códigos de idioma disponíveis)
+Por exemplo, para carregar o By design, temos mais exemplos em alemão do que em todos os outros idiomas combinados, então vamos usá-lo como ponto de partida para realizar a transferência multilíngue zero-shot para francês, italiano e inglês
+Vamos inspecionar um dos exemplos no corpus alemão
+Como em nossos encontros anteriores com objetos Dataset, as chaves de nosso exemplo correspondem aos nomes das colunas de uma tabela Apache Arrow, enquanto os valores denotam a entrada em cada coluna
+Em particular, vemos que a coluna ner_tags corresponde ao mapeamento de cada entidade para um inteiro
+Isso é um pouco enigmático para o olho humano, então vamos criar uma nova coluna com as conhecidas tags LOC, PER e ORG
+Para fazer isso, a primeira coisa a notar é que nosso objeto Dataset possui um atributo features que especifica os tipos de dados subjacentes associados a cada coluna
+A classe Sequence especifica que o campo contém uma lista de recursos, que no caso de ner_tags corresponde a uma lista de recursos ClassLabel
+Vamos escolher esse recurso do conjunto de treinamento da seguinte maneira
+Uma propriedade útil do recurso ClassLabel é que ele possui métodos de conversão para converter do nome da classe para um número inteiro e vice-versa
+Por exemplo, podemos encontrar o número inteiro associado à tag B-PER usando o ClassLabel
+Da mesma forma, podemos mapear de volta de um inteiro para o nome da classe correspondente
+Vamos usar o ClassLabel
+função int2str para criar uma nova coluna em nosso conjunto de treinamento com nomes de classe para cada tag
+Usaremos o conjunto de dados
+função map para retornar um dict com a chave correspondente ao novo nome da coluna e o valor como uma lista de nomes de classe
+Agora que temos nossas tags em formato legível por humanos, vamos ver como os tokens e as tags se alinham para o primeiro exemplo no conjunto de treinamento
+A presença das tags LOC faz sentido, pois a frase “2.000 Einwohnern an der Danziger Bucht in der polnischen Woiwodschaft Pommern” significa “2.000 habitantes na Baía de Gdansk na voivodia polonesa da Pomerânia” em inglês, e a Baía de Gdansk é uma baía na Mar Báltico, enquanto “voivodia” corresponde a um estado da Polônia
+Como uma verificação de sanidade de que não temos nenhum desequilíbrio incomum nas tags, vamos calcular as frequências de cada entidade em cada divisão
+Isso parece bom - a distribuição das frequências PER, LOC e ORG são aproximadamente as mesmas para cada divisão, portanto, os conjuntos de validação e teste devem fornecer uma boa medida da capacidade do nosso tagger NER de generalizar
+A seguir, vamos ver alguns Transformers multilíngues populares e como eles podem ser adaptados para lidar com nossa tarefa de NER
+Multilingual Transformers Os Multilingual Transformers envolvem arquiteturas e procedimentos de treinamento semelhantes aos de seus equivalentes monolíngues, exceto que o corpus usado para o pré-treinamento consiste em documentos em vários idiomas
+Uma característica notável dessa abordagem é que, apesar de não receber nenhuma informação explícita para diferenciar entre as línguas, as representações linguísticas resultantes são capazes de generalizar bem entre as línguas para uma variedade de tarefas posteriores.
+Em alguns casos, essa capacidade de realizar transferência cross-lingual pode produzir resultados competitivos com modelos monolíngues, o que evita a necessidade de treinar um modelo por idioma! Para medir o progresso da transferência multilíngue para NER, os conjuntos de dados CoNLL-2002 e CoNLL-2003 são frequentemente usados ​​como referência para inglês, holandês, espanhol e alemão
+Este benchmark consiste em artigos de notícias anotados com as mesmas categorias LOC, PER e ORG do PAN-X, mas contém um rótulo MISC adicional para entidades diversas que não pertencem aos três grupos anteriores
+Os modelos Multilingual Transformer são então avaliados de três maneiras diferentes
+pt Ajuste os dados de treinamento em inglês e, em seguida, avalie o conjunto de teste de cada idioma
+cada Ajuste e avalie os dados de treinamento monolíngüe para medir o desempenho por idioma
+all Ajuste todos os dados de treinamento para avaliar o aprendizado multilíngue
+Adotaremos uma estratégia de avaliação semelhante para nossa tarefa de NER e usaremos o XLM-RoBERTa (ou XLM-R para abreviar) que, no momento em que este livro foi escrito, é o modelo Transformer de última geração para aplicativos multilíngues
+Mas primeiro, vamos dar uma olhada nos dois modelos que inspiraram seu desenvolvimento
+O BERT multilíngue foi desenvolvido pelos autores do BERT do Google Research em 2018 e foi o primeiro modelo de Transformer multilíngue
+Ele tem a mesma arquitetura e procedimento de treinamento do BERT, exceto que o corpus de pré-treinamento consiste em artigos da Wikipédia de 104 idiomas
+O tokenizador também é WordPiece, mas o vocabulário é aprendido de todo o corpus para que o modelo possa compartilhar incorporações entre idiomas
+Para lidar com o fato de que o despejo da Wikipédia de cada idioma pode variar muito em tamanho, os dados para pré-treinamento e aprendizado do vocabulário do WordPiece são ponderados com uma função de suavização exponencial que diminui a amostragem de idiomas com muitos recursos, como o inglês, e aumenta a amostragem de idiomas com poucos recursos, como o birmanês
+XLM No artigo de pré-treinamento do modelo de linguagem cruzada, Guillaume Lample e Alexis Conneau, do Facebook AI Research, investigaram três objetivos de pré-treinamento para modelos de linguagem cruzada (XLM).
+Um desses objetivos é o objetivo de modelagem de linguagem mascarada (MLM) do BERT, mas em vez de receber sentenças completas como entrada, o XLM recebe sentenças que podem ser truncadas arbitrariamente (também não há tarefa de previsão da próxima sentença)
+Para aumentar o número de tokens associados a idiomas de poucos recursos, as sentenças são amostradas de um corpus monolíngue de acordo com a distribuição multinomial, com probabilidades e n é o número de sentenças em um corpus monolíngue C
+Outra diferença do BERT é o uso de Byte-Pair-Encoding em vez de WordPiece para tokenização, que os autores observam melhora o alinhamento das incorporações de linguagem entre idiomas
+O artigo também apresenta a modelagem de linguagem de tradução (TLM) como um novo objetivo de pré-treinamento, que concatena pares de sentenças de dois idiomas e mascara aleatoriamente os tokens como no MLM
+Para prever um token mascarado em um idioma, o modelo pode atender a tokens no par traduzido, o que incentiva o alinhamento das representações multilíngues
+Uma comparação dos dois métodos é mostrada na Figura Os objetivos de pré-treinamento MLM (superior) e TLM (inferior) do XLM
+OBSERVAÇÃO Existem diversas variantes de XLM com base na escolha do objetivo de pré-treinamento e no número de idiomas a serem treinados
+Para os fins desta discussão, usaremos XLM para denotar o modelo treinado nas mesmas 100 linguagens usadas para mBERT
+Como seus predecessores, o XLM-R usa o MLM como um objetivo de pré-treinamento para 100 idiomas, mas, conforme mostrado na Figura 62, distingue-se pelo enorme tamanho do corpus usado para o pré-treinamento
+Despejos da Wikipedia para cada idioma e terabytes de dados do Common Crawl da web
+Este corpus é várias ordens de magnitude maior do que os usados ​​em modelos anteriores e fornece um aumento significativo no sinal para idiomas com poucos recursos, como birmanês e suaíli, onde existe apenas um pequeno número de artigos da Wikipédia.
+Quantidade de dados para os idiomas que aparecem no corpus Wiki-100 usado para mBERT e XLM e no corpus CommonCrawl usado para XLM-R
+A parte RoBERTa do nome do modelo refere-se ao fato de que a abordagem de pré-treinamento é a mesma dos modelos RoBERTa monolíngues
+No artigo do RoBERTa, os autores melhoraram vários aspectos do BERT, em particular removendo completamente a próxima tarefa de previsão de sentença
+O XLM-R também descarta as incorporações de linguagem usadas no XLM e usa o SentencePiece6 para tokenizar os textos brutos diretamente
+Além de sua natureza multilíngue, uma diferença notável entre XLM-R e RoBERTa é o tamanho dos respectivos vocabulários
+250.000 fichas contra 55.000! A Tabela 6-2 resume as principais diferenças arquitetônicas entre todos os Transformers multilíngues
+O desempenho de mBERT e XLM-R no benchmark CoNLL também é mostrado na Figura 6-3
+Vemos que, quando treinados em todos os idiomas, os modelos XLM-R superam significativamente o mBERT e as abordagens anteriores de última geração
+Pontuações da F1 no benchmark CoNLL para NER
+A partir desta pesquisa, torna-se evidente que o XLM-R é a melhor escolha para NER multilíngue
+Na próxima seção, exploramos como ajustar o XLM-R para esta tarefa em um novo conjunto de dados
+Treinando um identificador de reconhecimento de entidade nomeada No Capítulo 2, vimos que, para classificação de texto, o BERT usa o token especial [CLS] para representar uma sequência inteira de texto
+Conforme mostrado no diagrama à esquerda da Figura 6-4, essa representação é então alimentada através de uma camada totalmente conectada ou densa para produzir a distribuição de todos os valores de rótulo discretos
+O BERT e outros transformadores codificadores adotam uma abordagem semelhante para o NER, exceto que a representação de cada token de entrada é alimentada na mesma camada totalmente conectada para gerar a entidade do token
+Por esse motivo, o NER geralmente é enquadrado como uma tarefa de classificação de token e o processo se parece com o diagrama correto
+Até aqui, tudo bem, mas como devemos lidar com subpalavras em uma tarefa de classificação de token? Por exemplo, o sobrenome “Sparrow” na Figura é tokenizado por WordPiece nas subpalavras “Spa” e “row”, então qual (ou ambos) deve receber o rótulo I-PER? No artigo BERT, os autores usaram a representação da primeira subpalavra e esta é a convenção que adotaremos aqui
+Embora pudéssemos ter optado por incluir a representação da subpalavra atribuindo a ela uma cópia do rótulo I-LOC, isso introduz uma complexidade extra quando as subpalavras são associadas a uma entidade, porque então precisamos copiar essas tags e isso viola o formato IOB2
+BERT de ajuste fino para classificação de texto (esquerda) e reconhecimento de entidade nomeada (direita)
+Felizmente, toda essa intuição do BERT é transportada para o XLM-R, pois a arquitetura é baseada no RoBERTa, que é idêntico ao BERT! No entanto, existem algumas pequenas diferenças, especialmente em torno da escolha do tokenizer
+Vejamos como os dois diferem
+SentencePiece Tokenization Em vez de usar um tokenizer WordPiece, o XLM-R usa um tokenizer chamado SentencePiece que é treinado no texto bruto de todos os 100 idiomas
+O tokenizador SentencePiece é baseado em um tipo de segmentação de subpalavras chamado Unigram e codifica o texto de entrada como uma sequência de caracteres Unicode
+Este último recurso é especialmente útil para corpora multilíngues, pois permite que o SentencePiece seja agnóstico em relação a acentos, pontuação e o fato de que muitos idiomas como o japonês não possuem caracteres de espaço em branco
+Para ter uma ideia de como o SentencePiece se compara ao WordPiece, vamos carregar os tokenizers BERT e XLM-R da maneira usual com Transformers
+Aqui vemos que, em vez dos tokens [CLS] e [SEP] que o BERT usa para tarefas de classificação de sentenças, o XLMR usa e para denotar o início e o fim de uma sequência
+Outra característica especial do SentencePiece é que ele trata o texto bruto como uma sequência de caracteres Unicode, com espaço em branco dado o símbolo Unicode U+2581 ou caractere _
+Ao atribuir um símbolo especial para espaço em branco, o SentencePiece é capaz de detokenizar uma sequência sem ambiguidades
+Em nosso exemplo acima, podemos ver que o WordPiece perdeu a informação de que não há espaço em branco entre “York” e
+Por outro lado, o SentencePiece preserva o espaço em branco no texto tokenizado para que possamos converter de volta ao texto bruto sem ambiguidade
+Agora que entendemos como o SentencePiece funciona, vamos ver como podemos codificar nosso exemplo simples em um formato adequado para NER
+A primeira coisa a fazer é carregar o modelo pré-treinado com um cabeçalho de classificação de token
+Mas, em vez de carregar esse cabeçote diretamente da biblioteca Transformers, nós mesmos o construiremos! Ao nos aprofundarmos na API Transformers, vamos ver como podemos fazer isso com apenas alguns passos
+A Anatomia da Classe Transformers Model Como vimos nos capítulos anteriores, a biblioteca Transformers é organizada em torno de classes dedicadas para cada arquitetura e tarefa
+A lista de tarefas suportadas pode ser encontrada na documentação do Transformers, e até o momento em que este livro foi escrito inclui e as classes associadas são nomeadas de acordo com uma convenção ModelNameForTask
+Na maioria das vezes, carregamos esses modelos usando o ModelNameForTask
+função from_pretrained e, como a arquitetura geralmente pode ser adivinhada apenas pelo nome, o Transformers fornece um conjunto conveniente de AutoClasses para carregar automaticamente a configuração, o vocabulário ou os pesos relevantes
+Na prática, essas AutoClasses são extremamente úteis porque significam que podemos mudar para uma arquitetura completamente diferente em nossos experimentos simplesmente mudando o nome do modelo! No entanto, essa abordagem tem suas limitações e, para motivar o aprofundamento na API Transformers, considere o seguinte cenário
+Suponha que você trabalhe para uma empresa de consultoria que está envolvida com muitos projetos de clientes a cada ano
+Ao estudar como esses projetos evoluem, você notou que as estimativas iniciais para pessoas-mês, número de pessoas necessárias e o tempo total do projeto são extremamente imprecisas
+Depois de pensar sobre esse problema, você tem a ideia de que alimentar as descrições escritas do projeto para um modelo do Transformer pode render estimativas muito melhores dessas quantidades
+Então você marca uma reunião com seu chefe e, com uma apresentação em Powerpoint habilmente elaborada, você argumenta que pode aumentar a precisão das estimativas do projeto e, assim, aumentar a eficiência da equipe e da receita, fazendo ofertas mais precisas
+Impressionado com sua apresentação colorida e sua conversa sobre eficiência e lucros, seu chefe generosamente concorda em lhe dar uma semana para criar uma prova de conceito
+Feliz com o resultado, você começa a trabalhar imediatamente e decide que a única coisa que você precisa é um modelo de regressão para prever as três variáveis ​​(pessoa-meses, número de pessoas e intervalo de tempo)
+Você liga sua GPU favorita e abre um notebook
+Você executa a partir da importação de transformadores BertForRegression e a cor escapa de seu rosto enquanto a temida cor vermelha preenche sua tela
+Oh não, não há modelo BERT para regressão! Como você deve concluir o projeto em uma semana se tiver que implementar todo o modelo sozinho?! Por onde você deveria começar? Não entrar em pânico! A biblioteca Transformers foi projetada para permitir que você estenda facilmente os modelos existentes para seu caso de uso específico
+Com ele você tem acesso a diversos utilitários como carregar pesos de modelos pré-treinados ou funções auxiliares específicas de tarefas
+Isso permite que você crie modelos personalizados para objetivos específicos com muito pouca sobrecarga
+Corpos e Cabeças O principal conceito que torna os Transformers tão versáteis é a divisão da arquitetura em corpo e cabeça
+Já vimos que quando passamos da tarefa de pré-treinamento para a tarefa a jusante, precisamos substituir a última camada do modelo por uma que seja adequada para a tarefa
+Esta última camada é chamada de cabeçote modelo e é a parte específica da tarefa
+O restante do modelo é chamado de corpo e inclui as incorporações de token e as camadas do Transformer que são independentes de tarefa
+Essa estrutura é refletida no código Transformers também
+O corpo de um modelo é implementado em uma classe como BertModel ou GPT2Model que retorna os estados ocultos da última camada
+Modelos específicos de tarefas, como BertForMaskedLM ou BertForSequenceClassification, usam o modelo base e adicionam a cabeça necessária sobre os estados ocultos, conforme mostrado na figura Figura
+A classe BertModel contém apenas o corpo do modelo, enquanto as classes BertForTask combinam o corpo com uma cabeça dedicada para uma determinada tarefa
+Criando seu próprio modelo XLM-R para classificação de token Essa separação de corpos e cabeças nos permite construir uma cabeça personalizada para qualquer tarefa e apenas montá-la em cima de um modelo pré-treinado! Vamos passar pelo exercício de construir um cabeçalho de classificação de token personalizado para XLM-R
+Como o XLM-R usa a mesma arquitetura de modelo do RoBERTa, usaremos o RoBERTa como modelo base, mas com configurações específicas do XLM-R
+Para começar, precisamos de uma estrutura de dados que representará nosso tagger XLM-R NER
+Como primeira suposição, precisaremos de um arquivo de configuração para inicializar o modelo e uma função de encaminhamento para gerar as saídas
+Com essas considerações, vamos construir nossa classe XLM-R para classificação de token
+A config_class garante que as configurações padrão do XLM-R sejam usadas quando inicializamos um novo modelo
+Se você quiser alterar os parâmetros padrão, você pode fazer isso substituindo as configurações padrão na configuração
+Com a função super() chamamos a função de inicialização de RobertaPreTrainedModel
+Em seguida, definimos nossa arquitetura de modelo pegando o corpo do modelo de RobertaModel e estendendo-o com nossa própria cabeça de classificação, consistindo em uma camada dropout e uma camada feedforward padrão
+Por fim, inicializamos todos os pesos chamando a função que carregará os pesos pré-treinados para o corpo do modelo e inicializaremos aleatoriamente os pesos de nossa cabeça de classificação de token
+A única coisa que resta a fazer é definir o que o modelo deve fazer em um passe para frente
+Definimos o seguinte comportamento na função forward
+Durante a passagem direta, os dados são alimentados primeiro pelo corpo do modelo
+Há uma série de variáveis ​​de entrada, mas as mais importantes que você deve reconhecer são as input_ids e as atenções_máscaras que são as únicas de que precisamos por enquanto
+O estado oculto, que faz parte da saída do corpo do modelo, é então alimentado através da camada de abandono e classificação
+Se também fornecermos rótulos na passagem direta, podemos calcular diretamente a perda
+Se houver uma máscara de atenção, precisamos trabalhar um pouco mais para garantir que calculamos apenas a perda dos tokens não mascarados
+Por fim, agrupamos todas as saídas em um objeto TokenClassifierOutput que nos permite acessar elementos em uma conhecida tupla nomeada dos capítulos anteriores
+A única coisa que resta a fazer é atualizar a função de espaço reservado na classe de modelo com nossas funções recém-assadas
+Olhando para o exemplo do problema de regressão tripla no início desta seção, agora vemos que podemos resolvê-lo facilmente adicionando uma cabeça de regressão personalizada ao modelo com a função de perda necessária e ainda temos uma chance de cumprir o prazo desafiador
+Agora estamos prontos para carregar nosso modelo de classificação de token
+Aqui precisamos fornecer algumas informações adicionais além do nome do modelo, incluindo as tags que usaremos para rotular cada entidade e o mapeamento de cada tag para um ID e vice-versa
+Todas essas informações podem ser derivadas de nossa variável de tags, que como um objeto ClassLabel possui um atributo de nomes que podemos usar para derivar o mapeamento
+Com esta informação e o atributo, podemos carregar a configuração XLM-R para NER da seguinte forma
+Agora, podemos carregar os pesos do modelo como de costume com a função
+Observe que não implementamos isso sozinhos
+obtemos isso gratuitamente herdando de RobertaPreTrainedModel
+Como uma verificação de sanidade que inicializamos o tokenizador e o modelo corretamente, vamos testar as previsões em nosso pequeno Como podemos ver, os tokens inicial e final recebem os IDs 0 e 2, respectivamente
+Para referência, podemos encontrar os mapeamentos dos outros caracteres especiais
+Por fim, precisamos passar as entradas para o modelo e extrair as previsões usando o argmax para obter a classe mais provável por token
+Sem surpresa, nossa camada de classificação de token com pesos aleatórios deixa muito a desejar; vamos ajustar alguns dados rotulados para torná-los melhores! Antes de fazer isso, vamos agrupar as etapas acima em uma função auxiliar para uso posterior
+Tokenizando e codificando os textos Agora que estabelecemos que o tokenizer e o modelo podem codificar um único exemplo, nossa próxima etapa é tokenizar todo o conjunto de dados para que possamos passá-lo para o modelo XLM-R para ajuste fino
+Como vimos no Capítulo 2, Datasets fornece uma maneira rápida de tokenizar um objeto Dataset com o método Dataset
+operação do mapa
+Para conseguir isso, lembre-se de que primeiro precisamos definir uma função com a assinatura mínima onde exemplos é equivalente a uma fatia de um conjunto de dados
+Como o tokenizador XLM-R retorna os IDs de entrada para as entradas do modelo, precisamos apenas aumentar essas informações com a máscara de atenção e os IDs de rótulo que codificam as informações sobre qual token está associado a cada tag NER
+Seguindo a abordagem adotada na documentação do Transformers, vamos ver como isso funciona com nosso único exemplo em alemão, coletando primeiro as palavras e tags como listas comuns
+Em seguida, tokenizamos cada palavra e usamos o argumento is_split_words para informar ao tokenizador que nossa sequência de entrada já foi dividida em palavras
+Aqui podemos ver que word_ids mapeou cada subpalavra para o índice correspondente na sequência de palavras, de modo que a primeira subpalavra recebe o índice, enquanto e “n” recebe o índice 1, pois “Einwohnern” é a segunda palavra em palavras
+Também podemos ver que tokens especiais como <s> e <\s> são mapeados para None
+Vamos definir -100 como o rótulo para esses tokens especiais e as subpalavras que desejamos mascarar durante o treinamento
+OBSERVAÇÃO Por que escolhemos -100 como ID para mascarar representações de subpalavras? O motivo é que no PyTorch a classe de perda de entropia cruzada e, portanto, podemos usá-la para ignorar os tokens associados a subpalavras consecutivas
+E é isso! Podemos ver claramente como os IDs dos rótulos se alinham com os tokens, então vamos expandir isso para todo o conjunto de dados definindo uma única função que envolva toda a lógica
+Em seguida, vamos verificar se nossa função funciona conforme o esperado em um único exemplo de treinamento
+Primeiro, devemos ser capazes de decodificar o exemplo de treinamento dos input_ids
+Bom, a saída decodificada do tokenizador faz sentido e podemos ver a aparência dos tokens especiais <s> e </s> para o início e o fim da frase
+Em seguida, vamos verificar se os IDs dos rótulos foram implementados corretamente filtrando os IDs dos rótulos de preenchimento e mapeando de volta do ID para a tag
+Agora temos todos os ingredientes necessários para codificar cada divisão, então vamos escrever uma função na qual podemos iterar
+Avaliar os taggers NER é semelhante a outras tarefas de classificação e é comum relatar resultados para precisão, recall e F-score
+A única sutileza é que todas as palavras de uma entidade precisam ser previstas corretamente para serem contadas como uma previsão correta
+Felizmente, existe uma biblioteca bacana chamada seqeval, projetada para esse tipo de tarefa
+Como podemos ver, seqeval espera as previsões e rótulos como uma lista de listas, com cada lista correspondendo a um único exemplo em nossos conjuntos de validação ou teste
+Para integrar essas métricas durante o treinamento, precisamos de uma função que possa pegar as saídas do modelo e convertê-las nas listas que o seqeval espera
+O seguinte faz o truque, garantindo que ignoramos os IDs de rótulo associados às subpalavras subsequentes
+Agora temos todos os ingredientes para ajustar nosso modelo
+Nossa primeira estratégia será ajustar nosso modelo básico no subconjunto alemão do PAN-X e, em seguida, avaliar seu desempenho multilíngue zero-shot em francês, italiano e inglês
+Como de costume, usaremos o Transformers Trainer para lidar com nosso loop de treinamento, então primeiro precisamos definir os atributos de treinamento usando a classe TrainingArguments
+Aqui, avaliamos as previsões do modelo no conjunto de validação no final de cada período, ajustamos o decaimento de peso e definimos save_steps para um número grande para desativar o ponto de verificação e, assim, acelerar o treinamento
+Também precisamos informar ao Trainer como calcular métricas no conjunto de validação, então aqui podemos usar a função align_predictions que definimos anteriormente para extrair as previsões e rótulos no formato necessário para seqeval para calcular o F-score
+A etapa final é definir um agrupador de dados para que possamos preencher cada sequência de entrada com o maior comprimento de sequência em um lote
+O Transformers fornece um agrupador de dados dedicado para classificação de tokens, que também preencherá as sequências de rótulos junto com as entradas
+Vamos passar todas essas informações junto com os conjuntos de dados codificados codificados para o Trainer
+Agora que o modelo está ajustado, é uma boa ideia salvar os pesos e o tokenizador para que possamos reutilizá-los mais tarde.
+Funciona! Mas nunca devemos ficar muito confiantes sobre o desempenho com base em um único exemplo
+Em vez disso, devemos conduzir investigações adequadas e completas dos erros do modelo
+Na próxima seção, exploramos como fazer isso para a tarefa NER
+Antes de nos aprofundarmos nos aspectos multilíngues do XLM-R, vamos dedicar um minuto para investigar os erros do nosso modelo
+Como vimos no Capítulo 2, uma análise completa de erros do seu modelo é um dos aspectos mais importantes ao treinar e depurar Transformers (e modelos de aprendizado de máquina em geral)
+Existem vários modos de falha em que pode parecer que o modelo está funcionando bem, embora na prática tenha algumas falhas sérias
+Exemplos em que os Transformers podem falhar incluem
+Podemos acidentalmente mascarar muitos tokens e também mascarar alguns de nossos rótulos para obter uma queda de perda realmente promissora
+A função compute_metrics pode ter um bug que superestima o desempenho real
+Podemos incluir a classe zero ou a entidade O no NER como uma classe normal, o que distorcerá fortemente a precisão e o F-score, pois é a classe majoritária por uma grande margem
+Quando o desempenho do modelo é muito pior do que o esperado, olhar para os erros também pode gerar insights úteis e revelar bugs que seriam difíceis de detectar apenas olhando para o código
+Mesmo que o modelo tenha um bom desempenho e não haja erros no código, a análise de erros ainda é uma ferramenta útil para entender os pontos fortes e fracos do modelo
+Esses são aspectos que sempre devemos ter em mente quando implantamos um modelo em um ambiente de produção
+Usaremos novamente uma das ferramentas mais poderosas à nossa disposição, que é examinar os exemplos de validação com maior perda
+Podemos reutilizar grande parte da função que construímos para analisar o modelo de classificação de sequência no Capítulo 2, mas agora calculamos uma perda por token na sequência de amostra
+e definir uma função que podemos iterar sobre o conjunto de validação
+Os tokens e os rótulos ainda estão codificados com seus IDs, então vamos mapear os tokens e rótulos de volta para strings para facilitar a leitura dos resultados
+Para os tokens de preenchimento com rótulo -100, atribuímos um rótulo especial IGN para que possamos filtrá-los posteriormente
+Cada coluna contém uma lista de tokens, rótulos, rótulos previstos e assim por diante para cada amostra
+Vamos dar uma olhada nos tokens individualmente descompactando essas listas
+A função pandas_Series_explode nos permite fazer exatamente isso em uma linha criando uma linha para cada elemento na lista de linhas original
+Como todas as listas em uma linha têm o mesmo tamanho, podemos fazer isso em paralelo para todas as colunas
+Também descartamos os tokens de preenchimento, pois sua perda é zero de qualquer maneira
+Com os dados nesta forma, agora podemos agrupá-los pelos tokens de entrada e agregar as perdas para cada token com a contagem, média e soma
+Por fim, classificamos os dados agregados pela soma das perdas e vemos quais tokens acumularam mais perdas no conjunto de validação
+Podemos observar vários padrões nesta lista
+O token de espaço em branco tem a maior perda total, o que não é surpreendente, pois também é o token mais comum na lista
+Em média, parece estar bem abaixo da maioria dos tokens da lista
+Palavras como in, von, der e und aparecem com relativa frequência
+Eles geralmente aparecem junto com entidades nomeadas e às vezes fazem parte deles, o que explica por que o modelo pode misturá-los
+Parênteses, barras e letras maiúsculas no início das palavras são mais raros, mas têm uma perda média relativamente alta
+Nós os investigaremos mais
+No final da lista vemos algumas subpalavras que aparecem raramente mas tem uma perda média muito alta
+Por exemplo, _West mostra que esses tokens aparecem em quase todas as classes e, portanto, representam um desafio de classificação para o modelo
+Podemos detalhar isso ainda mais traçando a matriz de confusão da classificação do token, onde vemos que o início de uma organização é frequentemente confundido com o token I-ORG subsequente
+Agora que examinamos os erros no nível do token, vamos seguir em frente e observar as sequências com altas perdas
+Para este cálculo, revisitamos o DataFrame “não explodido” e calculamos a perda total somando a perda por token
+Para fazer isso, vamos primeiro escrever uma função que nos ajude a exibir a sequência de tokens com os rótulos e as perdas
+É evidente que algo está errado com os rótulos dessas amostras; por exemplo, as Nações Unidas são rotuladas como uma pessoa! Acontece que as anotações para o conjunto de dados Wikiann foram geradas por meio de um processo automatizado
+Essas anotações são frequentemente chamadas de “padrão prata” (em contraste com o “padrão ouro” das anotações geradas por humanos), e não é surpresa que existam casos em que a abordagem automatizada falhou em produzir rótulos sensatos
+No entanto, esses modos de falha não são exclusivos de abordagens automáticas; mesmo quando os humanos anotam os dados cuidadosamente, podem ocorrer erros quando a concentração dos anotadores diminui ou eles simplesmente não entendem a frase
+Outra coisa que notamos ao olhar para os tokens com mais perdas foram os parênteses e barras
+Vejamos alguns exemplos de sequências com um parêntese de abertura
+Como o Wikiann é um conjunto de dados criado a partir da Wikipedia, podemos ver que as entidades contêm parênteses da frase introdutória de cada artigo onde o nome do artigo é descrito
+No primeiro exemplo, o parêntese simplesmente afirma que o Hama é um “Unternehmen” ou empresa em inglês
+Em geral, não incluiríamos os parênteses e seu conteúdo como parte da entidade nomeada, mas parece ser assim que a extração automática anotou os documentos
+Nos outros exemplos, o parêntese contém uma especificação geográfica
+Embora este também seja um local, podemos desconectá-los do local original nas anotações
+Esses são detalhes importantes para saber quando implementamos o modelo, pois isso pode ter implicações no desempenho a jusante de todo o pipeline do qual o modelo faz parte
+Com uma análise relativamente simples, encontramos pontos fracos tanto em nosso modelo quanto no conjunto de dados
+Em um caso de uso real, iteramos nesta etapa e limpamos o conjunto de dados, treinamos novamente o modelo e analisamos os novos erros até ficarmos satisfeitos com o desempenho
+Agora analisamos os erros em um único idioma, mas também estamos interessados ​​no desempenho entre os idiomas
+Na próxima seção, realizamos alguns experimentos para ver como funciona a transferência interlingual no XLM-R
+Agora que ajustamos o XLM-R em alemão, podemos avaliar sua capacidade de transferência para outros idiomas por meio do Trainer
+função de previsão que gera previsões sobre objetos Dataset
+Por exemplo, para obter as previsões no conjunto de validação, podemos executar o seguinte
+Objeto PredictionOutput que contém matrizes de previsões e label_ids, junto com as métricas que passamos para o treinador
+Por exemplo, as métricas no conjunto de validação podem ser acessadas da seguinte maneira
+As previsões e os IDs dos rótulos não estão em um formato adequado para o relatório de classificação do seqeval, então vamos alinhá-los usando nossa função align_predictions e imprimir o relatório de classificação com a seguinte função
+Para acompanhar nosso desempenho por idioma, nossa função também retorna a micro-média F-score
+Vamos usar esta função para examinar o desempenho no conjunto de teste e acompanhar nossas pontuações em um dict
+Estes são resultados muito bons para uma tarefa NER
+Nossas métricas estão no estádio de 85% e podemos ver que o modelo parece ter mais dificuldades nas entidades ORG, provavelmente porque as entidades ORG são as menos comuns nos dados de treinamento e muitos nomes de organizações são raros no vocabulário do XLM-R
+Que tal em outros idiomas? Para aquecer, vamos ver como nosso modelo ajustou as tarifas alemãs para as francesas
+Nada mal! Embora o nome e a organização sejam os mesmos em ambos os idiomas, o modelo conseguiu rotular corretamente a tradução francesa de “Kalifornien”
+Em seguida, vamos quantificar o desempenho de nosso modelo alemão em todo o conjunto de testes de francês, escrevendo uma função simples que codifica um conjunto de dados e gera o relatório de classificação nele
+Embora vejamos uma queda de cerca de 15 pontos nas métricas de micromédia, lembre-se de que nosso modelo não viu um único exemplo francês rotulado! Em geral, o tamanho da queda de desempenho está relacionado a quão “distantes” os idiomas estão uns dos outros
+Embora o alemão e o francês sejam agrupados como línguas indo-européias, eles tecnicamente pertencem às diferentes famílias de línguas de “germânico” e “românico”, respectivamente
+A seguir, vamos avaliar o desempenho no italiano
+Como o italiano também é uma língua românica, esperamos obter um resultado semelhante ao encontrado no francês
+De fato, nossas expectativas são confirmadas pelas métricas macromédias
+Por fim, vamos examinar o desempenho no inglês que pertence à família de línguas germânicas
+Surpreendentemente, nosso modelo se sai pior em inglês, embora possamos esperar intuitivamente que o alemão seja mais semelhante ao francês
+A seguir, vamos examinar as compensações entre a transferência multilíngue zero-shot e o ajuste fino diretamente no idioma-alvo
+Quando a transferência Zero-Shot faz sentido? Até agora, vimos que o ajuste fino do XLM-R no corpus alemão produz uma pontuação F de cerca de 85% e, sem nenhum treinamento adicional, é capaz de alcançar um desempenho modesto nas outras línguas do nosso corpus
+A questão é quão bons são esses resultados e como eles se comparam com um modelo XLM-R ajustado em um corpus monolíngue? Nesta seção, exploraremos essa questão para o corpus francês ajustando o XLM-R em conjuntos de treinamento de tamanho crescente
+Ao rastrear o desempenho dessa maneira, podemos determinar em que ponto a transferência cross-lingual de disparo zero é superior, o que, na prática, pode ser útil para orientar as decisões sobre a coleta de mais dados rotulados
+Como queremos treinar vários modelos, usaremos o recurso model_init da classe Trainer para que possamos instanciar um novo modelo a cada chamada para Trainer
+Para simplificar, também manteremos os mesmos hiperparâmetros do ajuste fino no corpus alemão, exceto que ajustaremos TrainingArguments
+logging_steps para levar em conta a mudança nos tamanhos do conjunto de treinamento
+Podemos agrupar tudo isso em uma função simples que pega um objeto DatasetDict correspondente a um corpus monolíngue, reduz a amostra por num_samples e ajusta o XLM-R nessa amostra para retornar as métricas da melhor época
+Como fizemos com o ajuste fino no corpus alemão, também precisamos codificar o corpus francês em IDs de entrada, máscaras de atenção e IDs de rótulo
+Podemos ver que, com apenas 250 exemplos, o ajuste fino no francês supera a transferência zero-shot do alemão por uma grande margem
+Vamos agora aumentar nossos tamanhos de conjunto de treinamento para 500, 1.000, 2.000 e 4.000 exemplos para ter uma ideia de como o desempenho aumenta
+Podemos comparar como o ajuste fino em amostras francesas se compara à transferência crosslingual zero-shot do alemão plotando os F-scores no conjunto de teste como uma função do aumento do tamanho do conjunto de treinamento
+A partir do gráfico, podemos ver que a transferência zero-shot permanece competitiva até cerca de 750 exemplos de treinamento, após o que o ajuste fino no francês atinge um nível de desempenho semelhante ao que obtivemos ao ajustar o alemão
+No entanto, este resultado não deve ser desprezado! Em nossa experiência, conseguir que especialistas de domínio rotulem centenas de documentos pode ser caro; especialmente para NER, onde o processo de rotulagem é minucioso e demorado
+Há uma técnica final que podemos tentar avaliar a aprendizagem multilíngue
+ajuste fino em vários idiomas ao mesmo tempo! Vamos ver como podemos fazer isso na próxima seção
+Ajuste fino em vários idiomas ao mesmo tempo Até agora, vimos que a transferência multilíngue zero-shot do alemão para o francês ou italiano produz uma queda de cerca de 15 pontos no desempenho
+Uma maneira de mitigar isso é ajustando vários idiomas ao mesmo tempo! Para ver que tipo de ganhos podemos obter, vamos primeiro usar a função concatenate_datasets de Datasets para concatenar os corpora alemães e franceses juntos
+Este modelo dá uma pontuação F semelhante ao nosso primeiro modelo que foi ajustado em alemão
+Como se sai com a transferência crosslingual? Primeiro, vamos examinar o desempenho no italiano
+Uau, esta é uma melhoria de 10 pontos em comparação com o nosso modelo alemão, que obteve uma pontuação F de cerca de 70% no italiano! Dadas as semelhanças entre o francês e o italiano, talvez isso não seja tão surpreendente; como o modelo se comporta em inglês? Aqui também temos um aumento significativo no desempenho de tiro zero em 7-8 pontos, com a maior parte do ganho vindo de uma melhoria dramática dos tokens PER! Aparentemente, a conquista normanda de 1066 deixou um efeito duradouro na língua inglesa.
+Vamos completar nossa análise comparando o desempenho do ajuste fino em cada idioma separadamente com o aprendizado multilíngue em todos os corpora
+Como já ajustamos o corpus alemão, podemos ajustar os idiomas restantes com nossa função train_on_subset, mas onde num_samples é igual ao número de exemplos no conjunto de treinamento
+Agora que ajustamos o corpus de cada idioma, o próximo passo é concatenar todas as divisões para criar um corpus multilíngue de todos os quatro idiomas
+Como fizemos com a análise anterior de alemão e francês, podemos usar nossa função concatenate_splits para fazer esta etapa para nós na lista de coropora que geramos na etapa anterior
+A etapa final é gerar as previsões do treinador no conjunto de teste de cada idioma
+Isso nos dará uma visão de como o aprendizado multilíngue está realmente funcionando
+Coletaremos os F-scores em nosso dicionário f1_scores e criaremos um DataFrame que resume os principais resultados de nossos experimentos multilíngues
+A partir desses resultados, podemos tirar algumas conclusões gerais
+A aprendizagem multilíngue pode proporcionar ganhos significativos no desempenho, especialmente se as línguas de baixo recurso para transferência interlíngue pertencerem a famílias linguísticas semelhantes
+Em nossos experimentos, podemos ver que alemão, francês e italiano alcançam desempenho semelhante em todas as categorias, sugerindo que esses idiomas são mais semelhantes entre si do que o inglês.
+Como estratégia geral, é uma boa ideia focar a atenção na transferência interlíngue dentro de famílias linguísticas, especialmente ao lidar com escritas diferentes como o japonês
+Construindo um Pipeline para Inferência Embora o objeto Trainer seja útil para treinamento e avaliação, em produção gostaríamos de poder passar texto bruto como entrada e receber as previsões do modelo como saída
+Felizmente, existe uma maneira de fazer isso usando a abstração do pipeline Transformers! Para reconhecimento de entidade nomeada, podemos usar o TokenClassificationPipeline, portanto, precisamos apenas carregar o modelo e o tokenizador e envolvê-los da seguinte maneira
+Ao inspecionar a saída, vemos que cada palavra recebe uma entidade prevista, pontuação de confiança e índices para localizá-la no espaço do texto
+Neste capítulo, vimos como alguém pode lidar com a tarefa de PNL em um corpus multilíngue usando um único Transformer pré-treinado em 100 idiomas
+Embora tenhamos conseguido mostrar que a transferência multilíngue do alemão para o francês é competitiva quando apenas um pequeno número de exemplos rotulados está disponível para ajuste fino, esse bom desempenho geralmente não ocorre se o idioma de destino for significativamente diferente do alemão ou for não é um dos 100 idiomas usados ​​durante o pré-treinamento
+Para tais casos, o baixo desempenho pode ser entendido a partir de uma falta de capacidade de modelo tanto no vocabulário quanto no espaço das representações multilinguísticas
+Propostas recentes como o MAD-X8 são projetadas precisamente para esses cenários de poucos recursos e, como o MAD-X é construído sobre Transformers, você pode facilmente adaptar o código neste capítulo para trabalhar com ele! Neste capítulo, vimos que a transferência interlingual ajuda a melhorar o desempenho em tarefas em um idioma onde os rótulos são escassos
+No próximo capítulo veremos como podemos lidar com poucos rótulos nos casos em que não podemos usar a transferência crosslingual, por exemplo, se não houver um idioma com muitos rótulos
+
