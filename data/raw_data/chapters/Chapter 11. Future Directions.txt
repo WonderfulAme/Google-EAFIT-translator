@@ -1,692 +1,431 @@
-Chapter 11. Future Directions
-A NOTE FOR EARLY RELEASE READERS
-With Early Release ebooks, you get books in their earliest formthe authors raw and
-unedited content as they writeso you can take advantage of these technologies long
-before the official release of these titles.
+Chapter 11. Future Directions.
+
+A NOTE FOR EARLY RELEASE READERS.
+With Early Release ebooks, you get books in their earliest formthe authors raw and unedited content as they writeso you can take advantage of these technologies long before the official release of these titles.
+
 This will be the 11th chapter of the final book. Please note that the GitHub repo will be
 made active later on.
-If you have comments about how we might improve the content andor examples in this
-book, or if you notice missing material within this chapter, please reach out to the editor at
-mpotter@oreilly.com.
-Throughout this book weve explored the powerful capabilities of transformers across a wide
-range of NLP tasks. In this final chapter we change the perspective and look at some of the
-current challenges with these models and the research trends that are trying to overcome them.
-In the first part we explore the topic of scaling up transformers both in terms of model and
-corpus size. Then we turn our attention towards various techniques that have been proposed to
-make the selfattention mechanism more efficient. Finally we explore the emerging and
-exciting field of multimodal transformers, which can model inputs across multiple domains like
-text, images, and audio.
 
-Scaling Transformers
-In 2019, the researcher Richard Sutton wrote a provocative essay entitled The Bitter Lesson in
-which he argued that
-The biggest lesson that can be read from 70 years of AI research is that general methods that
-leverage computation are ultimately the most effective, and by a large margin  Seeking an
-improvement that makes a difference in the shorter term, researchers seek to leverage their
-human knowledge of the domain, but the only thing that matters in the long run is the
-leveraging of computation. These two need not run counter to each other, but in practice they
-tend to  And the humanknowledge approach tends to complicate methods in ways that
-make them less suited to taking advantage of general methods leveraging computation.
-The essay provides several historical examples such as playing chess or Go, where encoding
-human knowledge within AI systems was ultimately outdone by increased computation. Sutton
-calls this the bitter lesson for the AI research field
+If you have comments about how we might improve the content andor examples in this book.
 
-We have to learn the bitter lesson that building in how we think we think does not work in the
-long run  One thing that should be learned from the bitter lesson is the great power of
-general purpose methods, of methods that continue to scale with increased computation even
-as the available computation becomes very great. The two methods that seem to scale
-arbitrarily in this way are search and learning.
-There are now signs that a similar lesson is at play with transformers; while many of the early
-BERT and GPT descendants focused on tweaking the architecture or pretraining objectives, the
-bestperforming models in mid2021 like GPT3 are essentially basic scaledup versions of the
-original models without much architectural modifications. In the figure below you can see the
-development of the largest models since the release of the Transformer in 2017, which shows
-that model size has increased by over four orders of magnitude in just a few years!
+if you notice missing material within this chapter, please reach out to the editor at mpotter@oreilly.com.
 
-This dramatic growth is motivated by empirical evidence that large language models perform
-better on downstream tasks and interesting capabilities such as zeroshot and fewshot learning
-emerge in the ten to hundredbillion parameter range. However, the number of parameters is
-not the only factor which affects model performance; the amount of compute and training data
-must also be scaled in tandem to train these monsters. Given that large language models like
-GPT3 are estimated to cost 4.6 million to train,1 it is clearly desirable to be able to estimate
-the model performance in advance. Somewhat surprisingly, the performance of language
-models appears to obey a powerlaw relationship with model size and other factors that is
-codified in a set of scaling laws.2 Lets take a look at this exciting area of research.
+Throughout this book weve explored the powerful capabilities of transformers across a wide range of NLP tasks.
 
-Scaling Laws
-Scaling laws allow one to empirically quantify the bigger is better paradigm for language
-models by studying their behavior with varying compute budget C , dataset size D, and model
-size N .3 The basic idea is to chart the dependence of the crossentropy loss L on these three
-factors and determine if a relationship emerges. For autoregressive models like those in the
-GPT family, the resulting loss curves are shown in Figure 111, where each blue curve
-represents the training run of a single model.
+In this final chapter we change the perspective and look at some of the current challenges with these models and the research trends that are trying to overcome them.
+
+In the first part we explore the topic of scaling up transformers both in terms of model and corpus size.
+
+Then we turn our attention towards various techniques that have been proposed to make the selfattention mechanism more efficient. 
+Finally we explore the emerging and exciting field of multimodal transformers, which can model inputs across multiple domains like text, images, and audio.
+
+In 2019, the researcher Richard Sutton wrote a provocative essay entitled The Bitter Lesson.
+The biggest lesson that can be read from 70 years of AI research is that general methods that leverage computation are ultimately the most effective, and by a large margin.
+
+Seeking an improvement that makes a difference in the shorter term, researchers seek to leverage their human knowledge of the domain.
+The only thing that matters in the long run is the leveraging of computation. 
+These two need not run counter to each other. 
+
+The humanknowledge approach tends to complicate methods in ways that make them less suited to taking advantage of general methods leveraging computation.
+
+The essay provides several historical examples such as playing chess or Go, where encoding human knowledge within AI systems was ultimately outdone by increased computation. 
+
+Sutton calls this the bitter lesson for the AI research field.
+
+We have to learn the bitter lesson that building in how we think we think does not work in the long run.
+
+One thing that should be learned from the bitter lesson is the great power of general purpose methods. 
+
+The two methods that seem to scale arbitrarily in this way are search and learning.
+
+There are now signs that a similar lesson is at play with transformers.
+
+While many of the early BERT and GPT descendants focused on tweaking the architecture or pretraining objectives.
+
+The bestperforming models in mid2021 like GPT3 are essentially basic scaledup versions of the original models without much architectural modifications. 
+
+In the figure below you can see the development of the largest models since the release of the Transformer in 2017, which shows that model size has increased by over four orders of magnitude in just a few years!
+
+This dramatic growth is motivated by empirical evidence that large language models perform better on downstream tasks.
+
+Interesting capabilities such as zeroshot and fewshot learning emerge in the ten to hundredbillion parameter range. 
+
+However, the number of parameters is not the only factor which affects model performance.
+
+The amount of compute and training data must also be scaled in tandem to train these monsters. 
+
+Given that large language models like GPT3 are estimated to cost 4.6 million to train,1 it is clearly desirable to be able to estimate the model performance in advance. 
+
+Somewhat surprisingly, the performance of language models appears to obey a powerlaw relationship with model size and other factors that is codified in a set of scaling laws.
+
+Lets take a look at this exciting area of research.
+
+Scaling laws allow one to empirically quantify the bigger is better paradigm.
+
+The basic idea is to chart the dependence of the crossentropy loss L on these three factors and determine if a relationship emerges. 
+
+For autoregressive models like those in the GPT family, the resulting loss curves are shown in Figure 111, where each blue curve represents the training run of a single model.
 
 Figure 111. Powerlaw scaling of test loss versus compute budget left, dataset size middle, and model size right.
 
-From these loss curves we can draw a few conclusions
-Performance depends strongly on scale
-Although many NLP researchers focus on architectural tweaks or hyperparameter
-optimization like the number of layers or attention heads to improve performance on a
-fixed set of datasets, the implication of scaling laws is that a more productive path towards
-better models is to focus on increasing N , C , or D in tandem.
-Smooth power laws
-The test loss L has a powerlaw relationship with each of N , C , and D across several
-orders of magnitude powerlaw relationships are linear on a loglog scale. For
+From these loss curves we can draw a few conclusions.
 
-X  N , C, D we can express these powerlaw relationships as L X  1 X, where α
+Performance depends strongly on scale although many NLP researchers focus on architectural tweaks or hyperparameter optimization.
 
-is a scaling exponent that is determined by a fit to loss curves shown in Figure 111.
-Typical values for α lie in the 0.050.095 range and one attractive feature of these powerlaws is that the early part of a loss curve can be extrapolated to predict what the
-approximate loss would be if training was conducted for much longer.
+The number of layers or attention heads to improve performance on a fixed set of datasets, the implication of scaling laws is that a more productive path towards.
 
-Sample efficiency
-Large models are able to reach the same performance as smaller models with a fewer
-number of training steps. This can be seen by comparing the regions where a loss curve
-plateaus over some number of training steps, which indicates one gets diminishing returns
-in performance compared to simply scaling up the model.
-Somewhat surprisingly, scaling laws have also been observed for other modalities like images,
-videos, and mathematical problem solving, as illustrated in Figure 112.
+The test loss L has a powerlaw relationship with each of N , C , and D across several orders of magnitude powerlaw relationships are linear on a loglog scale.
 
-Figure 112. Powerlaw scaling of test loss versus compute budget across a wide range of modalities.
+Typical values for α lie in the 0.050.095 range and one attractive feature of these powerlaws is that the early part of a loss curve can be extrapolated to predict what the approximate loss would be if training was conducted for much longer.
+
+Large models are able to reach the same performance as smaller models with a fewer number of training steps. 
+This can be seen by comparing the regions where a loss curve plateaus over some number of training steps, which indicates one gets diminishing returns in performance compared to simply scaling up the model.
+Somewhat surprisingly, scaling laws have also been observed for other modalities like images, videos, and mathematical problem solving, as illustrated in Figure 112.
+
+Powerlaw scaling of test loss versus compute budget across a wide range of modalities.
 
 Whether powerlaw scaling is a universal property of transformer language models is currently
-unknown. For now we can use scaling laws as a tool to extrapolate large, expensive models
-without having to explicitly train them. However, scaling isnt quite as easy as it sounds. Lets
-now look at a few challenges that come hand in hand when charting this frontier.
+unknown. 
+For now we can use scaling laws as a tool to extrapolate large, expensive models without having to explicitly train them. 
+However, scaling isnt quite as easy as it sounds. 
+Lets now look at a few challenges that come hand in hand when charting this frontier.
 
 Challenges With Scaling
-While scalingup sounds simple in theory just add more layers!, in practice it comes with
-many challenges. Here we list a few of the biggest challenges one encounted when scaling
-language models
-Infrastructure
-Provisioning and managing infrastructure that potentially spans 100s1000s of nodes with
-as many GPUs is not for the fainthearted. Are the required number of nodes available? Is
-communication between nodes a bottleneck? Tackling these issues requires a very different
-skill set than that found in most data science teams, and typically involves specialized
-engineers familiar with running largescale, distributed experiments.
+While scalingup sounds simple in theory just add more layers!, in practice it comes with many challenges. 
 
-Cost
-Most ML practitioners have experienced the feeling of waking up in the middle of the night
-in a cold sweat, remembering they forgot to shutdown that fancy GPU on AWS. This
-feeling intensifies when running largescale experiments and only a few companies can
-afford the teams and resources necessary to train models at the largest scales. Training a
-single model GPT3sized model can cost several million of dollars, which is not pocket
-change that many companies have laying around.5
+Here we list a few of the biggest challenges one encounted when scaling language models.
 
-Dataset curation
-A model is only as good as the data it is trained on. Training large models requires large,
-high quality datasets. When using terabytes of text data it becomes harder to make sure the
-data contains high quality text and even preprocessing becomes challenging. Furthermore,
-one needs to ensure that there is a way to control biases like sexism and racism that these
-language models can acquire when trained on largescale webtext corpora. Another type of
-consideration revolves around licensing issues with the training data and personal
-information that can be embedded in large textual datasets.
+Provisioning and managing infrastructure that potentially spans 100s1000s of nodes with as many GPUs is not for the fainthearted. 
 
-Model evaluation
-Once the model is trained the challenges dont stop. Evaluating the model on downstream
-tasks again requires time and resources. In addition you want to probe the model for biased
-and toxic generation even if you are confident that you created a clean dataset. These steps
-take time and need to carried out thoroughly to minimize the risks of adverse effects later
-on.
+Are the required number of nodes available? Is communication between nodes a bottleneck? 
 
-Deployment
-Finally, serving large language models also poses a significant challenge. In Chapter 5 we
-looked at a few approaches such as distillation, pruning and quantization to help with these
-issues. However, this may not be enough if you are starting with a model that is hundreds of
-gigabytes in size. Hosted services such as the OpenAI API or Hugging Faces Accelerated
-Inference API are designed to help companies that cannot or do not want to deal with these
-deployment challenges.
+Tackling these issues requires a very different skill set than that found in most data science teams, and typically involves specialized engineers familiar with running largescale, distributed experiments.
 
-This is by no means an exhaustive list and should just give you an idea for the kind of
-considerations and challenges that go hand in hand with scaling language models to ever larger
-sizes. While most of theses efforts are centralized around a few institutions that have resources
-and knowhow to push the boundaries, there are currently two communityled projects that aim
-to produce and probe large language models in the open
-BigScience
+Most ML practitioners have experienced the feeling of waking up in the middle of the night in a cold sweat, remembering they forgot to shutdown that fancy GPU on AWS.
+This feeling intensifies when running largescale experiments and only a few companies can afford the teams and resources necessary to train models at the largest scales. 
+Training a single model GPT3sized model can cost several million of dollars, which is not pocket change that many companies have laying around.
 
-This is a oneyear long research workshop focused on large language models. This
-workshop will foster discussions and reflections around the research questions surrounding
-large language models capabilities, limitations, potential improvements, bias, ethics,
-environmental impact, role in the general AIcognitive research landscape as well as the
-challenges around creating and sharing such models and datasets for research purposes and
-among the research community. The collaborative tasks involves creating, sharing and
-evaluating a large multilingual dataset and a large language model. An unusually large
-compute budget was allocated for these collaborative tasks several million GPU hours on
-several thousands GPUs. If successful, this workshop will run again in the future involving
-an updated or different set of collaborative tasks. If you want to join the effort, you can find
-more information at the projects website.
+A model is only as good as the data it is trained on. 
+Training large models requires large, high quality datasets. 
+When using terabytes of text data it becomes harder to make sure the data contains high quality text and even preprocessing becomes challenging. 
+Furthermore,one needs to ensure that there is a way to control biases like sexism and racism that these language models can acquire when trained on largescale webtext corpora. 
+Another type of consideration revolves around licensing issues with the training data and personal information that can be embedded in large textual datasets.
 
-EleutherAI
-This is a decentralized collective of volunteer researchers, engineers, and developers
-focused on AI alignment, scaling, and open source AI research. One of its aims is to train
-and opensource a GPT3sized model and the group has already released some impressive
-models like GPTNeo and GPTJ which is a sixbillion parameter model and currently the
-bestperforming publicly available transformer in terms of zeroshot performance. You can
-find more information at EleutherAIs website.
-Now that weve explored how to scale transformers across compute, model size and dataset
-size, lets examine another active area of research making selfattention more efficient.
+Once the model is trained the challenges dont stop. 
+Evaluating the model on downstream tasks again requires time and resources. 
+In addition you want to probe the model for biased and toxic generation even if you are confident that you created a clean dataset. 
+These steps take time and need to carried out thoroughly to minimize the risks of adverse effects later on.
 
-Attention Please!
-Weve seen throughout this book that the selfattention mechanism plays a central role in the
-architecture of transformers; after all, the original Transformer paper is called Attention is All
-You Need! However, there is a key challenge associated with selfattention since the weights
-are generated from pairwise comparisons of all the tokens in a sequence, this layer becomes a
-computational bottleneck when trying to process long documents or apply transformers to
-domains like speech processing or computer vision. In terms of computational and memory
-complexity, the selfattention layer of the Transformer scales like O n , where n is the length
-of the sequence.
+Finally, serving large language models also poses a significant challenge. 
+In Chapter 5 we looked at a few approaches such as distillation, pruning and quantization to help with these
+issues. 
+However, this may not be enough if you are starting with a model that is hundreds of gigabytes in size.
+Hosted services such as the OpenAI API or Hugging Faces Accelerated Inference API are designed to help companies that cannot or do not want to deal with these.
 
-As a result, much of the recent research on transformers has focused on making selfattention
-more efficient and the research directions are broadly clustered in figure Figure 113.
+This is by no means an exhaustive list and should just give you an idea for the kind of considerations and challenges that go hand in hand with scaling language models to ever larger sizes. 
+While most of theses efforts are centralized around a few institutions that have resources and knowhow to push the boundaries, there are currently two communityled projects that aim to produce and probe large language models in the open BigScience.
 
-Figure 113. A summarization of research directions to make attention more efficient6.
+This is a oneyear long research workshop focused on large language models. 
+This workshop will foster discussions and reflections around the research questions surrounding
+large language models capabilities.
+The general AIcognitive research landscape as well as the challenges around creating and sharing such models and datasets for research purposes and among the research community. 
+The collaborative tasks involves creating, sharing and evaluating a large multilingual dataset and a large language model. 
+An unusually large compute budget was allocated for these collaborative tasks several million GPU hours on several thousands GPUs. 
+If successful, this workshop will run again in the future involving an updated or different set of collaborative tasks. 
+If you want to join the effort, you can find more information at the projects website.
 
-A common pattern is to make attention more efficient by introducing sparsity into the attention
-mechanism or by applying kernels to the attention matrix. A selected set of papers is shown in
-Figure 114, which shows how the O n  complexity of the Transformers selfattention has
-been reduced over time.
+This is a decentralized collective of volunteer researchers, engineers, and developers focused on AI alignment, scaling, and open source AI research. One of its aims is to train and opensource GPT3sized model.
+The group has already released some impressive models like GPTNeo and GPTJ which is a sixbillion parameter model and currently the  bestperforming publicly available transformer in terms of zeroshot performance. 
+You can find more information at EleutherAIs website.
+Now that weve explored how to scale transformers across compute, model size and dataset size, lets examine another active area of research making selfattention more efficient.
 
-Figure 114. Recent works on making selfattention more efficient.
+Weve seen throughout this book that the selfattention mechanism plays a central role in the architecture of transformers.
+After all, the original Transformer paper is called Attention is All You Need! 
+However, there is a key challenge associated with selfattention since the weights are generated from pairwise comparisons of all the tokens in a sequence. 
+This layer becomes a computational bottleneck when trying to process long documents or apply transformers to domains like speech processing or computer vision. 
+In terms of computational and memory complexity, the selfattention layer of the Transformer scales like O n , where n is the length of the sequence.
 
-Lets take a quick look at some of the most popular approaches to make selfattention more
-efficient, starting with sparsity.
+As a result, much of the recent research on transformers has focused on making selfattention more efficient and the research directions are broadly clustered in figure.
 
-Sparse Attention
-One way to reduce the number of computations that are performed in the selfattention layer is
-to simply limit the number of querykey pairs that are generated according to some predefined
-pattern. There have been many sparsity patterns explored in the literature, but most of them can
-be decomposed into a handful of atomic patterns illustrated in Figure 115.
+A summarization of research directions to make attention more efficient.
 
-Figure 115. Common atomic sparse attention patterns for selfattention. A colored square means the attention score is
-calculated, while a blank square means the score is discarded.
+A common pattern is to make attention more efficient by introducing sparsity into the attention mechanism or by applying kernels to the attention matrix. 
+A selected set of papers is shown in Figure 114, which shows how the O n  complexity of the Transformers selfattention has been reduced over time.
 
-We can describe these patterns as follows
+Recent works on making selfattention more efficient.
 
-Global attention
+Lets take a quick look at some of the most popular approaches to make selfattention more efficient, starting with sparsity.
+
+One way to reduce the number of computations that are performed in the selfattention layer is to simply limit the number of querykey pairs that are generated according to some predefined pattern. 
+There have been many sparsity patterns explored in the literature, but most of them can be decomposed into a handful of atomic patterns illustrated in Figure 115.
+
+Common atomic sparse attention patterns for selfattention. A colored square means the attention score is calculated, while a blank square means the score is discarded.
+
+We can describe these patterns as follows Global attention.
+
 Defines a few special tokens in the sequence that are allowed to attend to all other tokens.
 
-Band attention
 Computes attention over a diagonal band.
 
-Dilated attention
 Skips some querykey pairs by using a dilated window with gaps.
 
-Random attention
 Randomly samples a few keys for each query to compute attention scores.
 
-Block local attention
 Divides the sequence into blocks and restricts attention within these blocks.
-In practice, most transformer models with sparse attention use a mix of the atomic sparsity
-patterns shown in Figure 115 to generate the final attention matrix. As illustrated in Figure 116,
-models like Longformer use a mix of global and band attention, while BigBird adds random
-attention to the mix. By introducing sparsity into the attention matrix, these models can process
-much longer sequences; in the case of Longformer and BigBird the maximum sequence length
-is 4,096 tokens, which is eight times larger than BERT!
+In practice, most transformer models with sparse attention use a mix of the atomic sparsity patterns shown in Figure 115 to generate the final attention matrix. 
+As illustrated in Figure 116, models like Longformer use a mix of global and band attention, while BigBird adds random attention to the mix. 
+By introducing sparsity into the attention matrix, these models can process much longer sequences.
+In the case of Longformer and BigBird the maximum sequence length is 4,096 tokens, which is eight times larger than BERT!
 
-Figure 116. Sparse attention patterns for recent transformer models.
+Sparse attention patterns for recent transformer models.
 
-NOTE
-It is also possible to learn the sparsity pattern in a datadriven manner. The basic idea behind these approaches is
-to cluster the tokens into chunks. For example, Reformer uses a hash function to cluster similar tokens together.
+It is also possible to learn the sparsity pattern in a datadriven manner. 
 
-Now that weve seen how sparsity can reduce the complexity of selfattention, lets take a look
-at another popular approach based on changing the operations directly.
+The basic idea behind these approaches is to cluster the tokens into chunks. 
 
-Linearized Attention
-An alternative way to make selfattention more efficient is to change the order of operations
-that are involved in computing the attention scores. Recall that to compute the selfattention
-scores of the queries and keys we need a similarity function, which for the Transformer is just a
-simple dotproduct. However, for a general similarity function simq , k  we can express the
-attention outputs as the following equation
+For example, Reformer uses a hash function to cluster similar tokens together.
 
-The trick behind linearized attention mechanisms is to express the similarity function as a
-kernel function which decomposes the operation into two pieces
+Now that weve seen how sparsity can reduce the complexity of selfattention, lets take a look at another popular approach based on changing the operations directly.
 
-where ϕ is typically a highdimensional featuremap. Since ϕQ  is independent of j and k,
-we can pull it under the sums to write the attention outputs as follows
+An alternative way to make selfattention more efficient is to change the order of operations that are involved in computing the attention scores.
+ 
+Recall that to compute the selfattention scores of the queries and keys we need a similarity function, which for the Transformer is just a simple dotproduct. 
 
-By first computing  ϕ K V and  ϕ K , we can effectively linearize the space and
-time complexity of selfattention! The comparison between the two approaches is illustrated in
-Figure 117 and popular models which implement this approach are Linear Transformer and
-Performer.
+However, for a general similarity function simq , k  we can express the attention outputs as the following equation.
 
-Figure 117. Complexity difference between standard selfattention and linearized selfattention.
+The trick behind linearized attention mechanisms is to express the similarity function as a kernel function which decomposes the operation into two pieces.
 
-In this section weve seen how transformer architectures in general and attention in particular
-are scaled up to achieve even better performance on a wide range of tasks. In the next section
-well have a look how transformers are branching out of NLP into other domains such as audio
-and computer vision.
+By first computing  ϕ K V and  ϕ K , we can effectively linearize the space and time complexity of selfattention! 
+The comparison between the two approaches is illustrated in Figure 117 and popular models which implement this approach are Linear.
 
-Going Beyond Text
-Using raw text to train language models has been the driving force behind the success of
-transformer language models in combination with transfer learning. On the one hand, raw text
-is abundant and enables selfsupervised training of large models. On the other hand, textual
-tasks such as classification or questionanswering are common and solving them effectively
-allows us to address a wide range of realworld problems.
-However, there are limits to this approach Human reporting bias
+Complexity difference between standard selfattention and linearized selfattention.
 
-The frequencies of events in text does not represent their true frequencies.8 A model solely
-trained on text from the internet might have a very distorted image of the world.
+In this section weve seen how transformer architectures in general and attention in particular are scaled up to achieve even better performance on a wide range of tasks. 
+In the next section well have a look how transformers are branching out of NLP into other domains such as audio and computer vision.
 
-Common sense
-Common sense is a fundamental quality of human reasoning but rarely written down. As
-such language models trained on text might know many facts about the world, but lack
-basic common sense reasoning.
-Facts
+Using raw text to train language models has been the driving force behind the success of transformer language models in combination with transfer learning. 
+On the one hand, raw text is abundant and enables selfsupervised training of large models. On the other hand, textual tasks such as classification.
+questionanswering are common and solving them effectively allows us to address a wide range of realworld problems.
 
-A probabilistic language model can not store facts in a reliable way and can produce text
-that is factually wrong. Similarly, such models can detect named entities, but have no direct
-way to access information about such them.
+The frequencies of events in text does not represent their true frequencies. 
+A model solely trained on text from the internet might have a very distorted image of the world.
 
-Modality
-Language models have no way connect to other modalities such as audio or visual signals,
-which could address some of the previous points, such as the reporting bias and common
-sense e.g. through video material or factual data e.g. via access to tabular data.
-So if we could solve the modality limitiations we could potentially address some of the others
-as well. Recently there has been a lot of progress in pushing transformers to new modalities and
-even building multimodal models. In this sections well highlight a few of these advances.
+Common sense is a fundamental quality of human reasoning but rarely written down. 
+As such language models trained on text might know many facts about the world, but lack basic common sense reasoning.
 
-Vision
+A probabilistic language model can not store facts in a reliable way and can produce text that is factually wrong. 
+Similarly, such models can detect named entities, but have no direct way to access information about such them.
+
+Language models have no way connect to other modalities such as audio or visual signals, which could address some of the previous points, such as the reporting bias and common sense e.g. 
+Through video material or factual data e.g. via access to tabular data.
+So if we could solve the modality limitiations we could potentially address some of the others as well. 
+Recently there has been a lot of progress in pushing transformers to new modalities and even building multimodal models. 
+In this sections well highlight a few of these advances.
+
 Vision has been the stronghold of CNNs since they kickstarted the deep learning revolution.
-More recently, transformers have begun to be applied to this domain and achieve similar or
-better efficiency than CNNs. Lets have a look at a few examples.
+More recently, transformers have begun to be applied to this domain and achieve similar or better efficiency than CNNs. 
+Lets have a look at a few examples.
 
-iGPT
 Inspired by the success of the GPT family of models with, iGPT applies the same methods to
-images.9 By thinking of images as a sequence of pixels, iGPT uses the GPT architecture and
-autoregressie pretraining objective to predict the next pixel values. By pretraining on large
-image datasets, iGPT is able to autocomplete partial images as displayed in Figure 118. It
-also achieves performant results on classification tasks by adding a classification head to the
-model.
+images. 
+By thinking of images as a sequence of pixels, iGPT uses the GPT architecture and autoregressie pretraining objective to predict the next pixel values. 
+By pretraining on large image datasets, iGPT is able to autocomplete partial images as displayed in Figure 118. 
+It also achieves performant results on classification tasks by adding a classification head to the model.
 
-Figure 118. Examples of image completions with iGPT.
+Examples of image completions with iGPT.
 
-ViT
-We saw that iGPT follows closely the GPT style architecture and pretraining procedure. The
-work on Vision Transformer ViT10 is a BERTstyle take on transformers for vision as
-illustrated in Figure 119. First the image is split in smaller patches and each of these patches is
-embedded with a linear projection. The results strongly resemble the token embeddings in
-BERT and what follows is virtually identical. The patch embeddings are combined with
-position embeddings and then fed through an ordinary transformer encoder. During pretraining
-some of the patches are masked or distorted and the objective is to the average color of the
-masked patch.
 
-Figure 119. ViT architecture.
+We saw that iGPT follows closely the GPT style architecture and pretraining procedure. 
+The work on Vision Transformer ViT10 is a BERTstyle take on transformers for vision as illustrated in Figure 119. 
+First the image is split in smaller patches and each of these patches is embedded with a linear projection. 
+The results strongly resemble the token embeddings in BERT and what follows is virtually identical. 
+The patch embeddings are combined with position embeddings and then fed through an ordinary transformer encoder. 
+During pretraining some of the patches are masked or distorted and the objective is to the average color of the masked patch.
 
-While this approach did not produce better results when pretrained on the standard ImageNet
-dataset, it scaled significantly better than CNNs on larger datasets.
-ViT is already integrated in Transformers and using it should look very familiar, now that you
-have mastered the API for NLP models. Lets start by loading a familiarlooking image
-import requests
-from PIL import Image
-image  Image.openimagesdoge.jpg
-image
 
-Next we load a ViT model that has been trained for image classification on the ImageNet
-dataset. The main difference between an NLP and CV transformer is that we use a feature
-extractor instead of a tokenizer to preprocess the images, but the functionality is essentially the
-same. The ViTFeatureExtractor takes a raw image and processes such that it can be fed
-to the model.
-from transformers import ViTFeatureExtractor, ViTForImageClassification
-model_ckpt  googlevitbasepatch16224
-feature_extractor  ViTFeatureExtractor.from_pretrainedmodel_ckpt
-model  ViTForImageClassification.from_pretrainedmodel_ckpt
+While this approach did not produce better results when pretrained on the standard ImageNet dataset, it scaled significantly better than CNNs on larger datasets.
 
-Finally, we process the image, pass it to the model and extract the predicted class from the
-logits
-inputs  feature_extractorimagesimage, return_tensorspt
-outputs  modelinputs
-logits  outputs.logits
-predicted_class_idx  logits.argmax1.item
-printPredicted class, model.config.id2labelpredicted_class_idx
-Predicted class Eskimo dog, husky
+ViT is already integrated in Transformers and using it should look very familiar, now that you have mastered the API for NLP models. 
+Lets start by loading a familiar.
 
-Great, the predicted class seems to match the image. Since the model is a PyTorch model you
-can easily create a training loop to finetune the model for your classification usecase.
+Next we load a ViT model that has been trained for image classification on the ImageNet dataset. 
+The main difference between an NLP and CV transformer is that we use a feature extractor instead of a tokenizer to preprocess the images, but the functionality is essentially the same. 
+The ViTFeatureExtractor takes a raw image and processes such that it can be fed to the model.
+
+Finally, we process the image, pass it to the model and extract the predicted class from the logits.
+
+Great, the predicted class seems to match the image. Since the model is a PyTorch model you can easily create a training loop to finetune the model for your classification usecase.
+
 A natural extension of image models are video models. In addition to the spatial dimensions,
-videos come with a temporal dimension. This makes the task more challenging as the volume
-of data gets much bigger and one needs to deal with the extra temporal dimension. Models such
-as TimeSformer11 introduce a spatial and temporal attention mechanism to account for both. In
-the future, such models can help build tools for a wide range of tasks such as classification or
-annotation of video sequences.
+videos come with a temporal dimension. 
+This makes the task more challenging as the volume of data gets much bigger and one needs to deal with the extra temporal dimension. 
+Models such as TimeSformer11 introduce a spatial and temporal attention mechanism to account for both. 
+In the future, such models can help build tools for a wide range of tasks such as classification or, annotation of video sequences.
 
-Tables
-A lot of data such as customer data within a company is stored in structured databases instead
-of raw text. Weve seen in Chapter 4 that with questionanswering models we can query text
-with a question in natural text. Wouldnt it be nice if you could do the same in with tables as
-shown in Figure 1110?
+A lot of data such as customer data within a company is stored in structured databases instead of raw text. 
+Weve seen in Chapter 4 that with questionanswering models we can query text with a question in natural text. 
+Wouldnt it be nice if you could do the same in with tables as shown in Figure 1110?
 
-Figure 1110. QA on a table.
-
-TAPAS short for Table Parser12 to the rescue! This model applies the transformer architecture
-to tables by combining the tabular information with the query as illustrated in Figure 1111.
+TAPAS short for Table Parser12 to the rescue! 
+This model applies the transformer architecture to tables by combining the tabular information with the query as illustrated in Figure 1111.
 
 Figure 1111. Architecture of TAPAS.
 
-Lets look at an example of how TAPAS works in practice. We have created an enriched
-version of this books table of content. It contains the chapter number, the name of the chapter
-as well as the starting and ending page of the chapters.
-We can also easily add the number of pages each chapter has with the existing fields. In order
-to play nicely with the TAPAS model we need to make sure that all columns are of type str.
+Lets look at an example of how TAPAS works in practice. 
+We have created an enriched version of this books table of content. 
+It contains the chapter number, the name of the chapter as well as the starting and ending page of the chapters.
+We can also easily add the number of pages each chapter has with the existing fields. 
+In order to play nicely with the TAPAS model we need to make sure that all columns are of type str.
 
 By now you should know the drill we need to first load the pretrained tokenizer and model.
-This looks exactly like the steps for a normal text model
-from transformers import TapasTokenizer, TapasForQuestionAnswering
-model_name  googletapasbasefinetunedwtq
-model  TapasForQuestionAnswering.from_pretrainedmodel_name
-tokenizer  TapasTokenizer.from_pretrainedmodel_name
+This looks exactly like the steps for a normal text model.
 
-Now, we can define a list of questions we would like to ask about the table. Then we pass the
-table with the questions through the tokenizer so we get the inputs that we can feed to through
-the model. Finally, we convert the raw logit outputs to predictions. Note that TAPAS has two
-outputs for each query the model can output one or more coordinates from the table as well as
-an aggregation function. There are four possible aggregation functions none, sum, average, and
-count. So the model can output a selection of cells as well as an aggregation function that
-should be applied to them. Lets give the model a spin and see how that works
-queries  Whats the topic in chapter 4?,
-What is the total number of pages?,
-On which page does the chapter about questionanswering start?,
+Now, we can define a list of questions we would like to ask about the table. 
+Then we pass the table with the questions through the tokenizer so we get the inputs that we can feed to through
+the model. 
+Finally, we convert the raw logit outputs to predictions. 
+Note that TAPAS has two outputs for each query the model can output one or more coordinates from the table as well as an aggregation function. 
+There are four possible aggregation functions none, sum, average, and count. 
+So the model can output a selection of cells as well as an aggregation function that should be applied to them. 
+Lets give the model a spin and see how that works queries.
+What is the total number of pages?
+On which page does the chapter about questionanswering start?
 How many chapters have more than 20 pages?
-inputs  tokenizertabletable, queriesqueries, paddingmax_length,
-return_tensorspt
-outputs  modelinputs
-answer_coordinates, agg_indices  tokenizer.convert_logits_to_predictions
-inputs,
-outputs.logits.detach,
-outputs.logits_aggregation.detach
 
-Now, we need to use the coordinates to actually get the values from the table. This requires a
-little bit of postprocessing
-lets print out the results
-id2aggregation  0 NONE, 1 SUM, 2 AVERAGE, 3COUNT
-agg_string  id2aggregationx for x in agg_indices
-answers  
-for coordinates in answer_coordinates
-if lencoordinates  1  only a single cell
-answers.appendtable.iatcoordinates0
-else  multiple cells
-cell_values  
-for coordinate in coordinates
-cell_values.appendtable.iatcoordinate
-answers.append, .joincell_values
-for query, answer, predicted_agg in zipqueries, answers, agg_string
-printquery
-if predicted_agg  NONE printPredicted answer   answer
-else printPredicted answer   predicted_agg      answer
-print50
+Now, we need to use the coordinates to actually get the values from the table. 
+This requires a little bit of postprocessing.
+Lets print out the results.
+
 Whats the topic in chapter 4?
-Predicted answer Summarization
 
 What is the total number of pages?
-Predicted answer SUM  10, 36, 24, 46, 19, 3
 
 On which page does the chapter about questionanswering start?
-Predicted answer AVERAGE  74
 
 How many chapters have more than 20 pages?
-Predicted answer COUNT  1, 2, 3
 
-So now that we have the model predictions we can investigate if it works. For the first chapter
-the model predicted exactly one cell with no aggregation. If we look at the table we see that the
-answer is in fact correct. In the next example the model predicted all the cells containing the
-number of pages in combination with the sum aggregator which again is the correct way of
-calculating the total number of pages. Also the answer to question three is correct, however, the
-average aggregation is not necessary in that case but also does not make a difference. Finally,
-we have a question that is a little bit more complex. To determine how many chapters have
-more than one pages we first need to find out which chapters satisfy that criterion and then
-count them. It seem that TAPAS again got it right and correctly determined that chapters 1, 2,
-and 3 have more than 20 pages and added a count aggregator to the cells.
-The kind of questions we asked can also be solved with a few simple Pandas commands,
-however, the ability to ask questions in natural language instead of Python code allows a much
-wider audience to query the data to answer specific questions. Imagine such tools in the hands
-of business analysts or managers who are able verify their own hypothesis about the data.
+So now that we have the model predictions we can investigate if it works.
+ 
+For the first chapter the model predicted exactly one cell with no aggregation.
+ 
+If we look at the table we see that the answer is in fact correct. 
+In the next example the model predicted all the cells containing the number of pages in combination with the sum aggregator which again is the correct way of calculating the total number of pages. 
+Also the answer to question three is correct, however, the average aggregation is not necessary in that case but also does not make a difference. 
+Finally, we have a question that is a little bit more complex. 
+To determine how many chapters have more than one pages we first need to find out which chapters satisfy that criterion and then count them. 
+It seem that TAPAS again got it right and correctly determined that chapters.
 
-Multimodal Transformers
+The kind of questions we asked can also be solved with a few simple Pandas commands, however, the ability to ask questions in natural language instead of Python.
+Imagine such tools in the hands of business analysts or managers who are able verify their own hypothesis about the data.
+
 
 So far weve looked at extending transformers to a single new modality. TAPAS is arguably
 multimodal since it combines text and tables, but the table is also treated as text. In this section
 we examine transformers that combine two modalities at once audiotext and visiontext.
 
-SpeechtoText
-Although being able to use text to interface with a computer is a huge step forward, using
-spoken language is an even more natural way for us to communicate. You can see this trend in
-industry, where applications such as Siri or Alexa are on the rise and becoming progressively
-more useful. Also for a large fraction of the population, writing and reading are more
-challenging than speaking. So being able to process and understand audio is not only
-convenient, but can help many people access more information. A common task in this domain
-is automatic speech recognition ASR which converts spoken words to text and enables voice
-technologies like Siri to answer questions like What is the weather like today?.
-The Wav2Vec2 family of models are one of the most recent developments in ASR and use a
-transformer layer in combination with a CNN as illustrated in Figure 1112. By leveraging
-unlabeled data during pretraining, these models achieve competitive results with only a few
-minutes of labeled data.
+Although being able to use text to interface with a computer is a huge step forward, using spoken language is an even more natural way for us to communicate. 
+You can see this trend in industry, where applications such as Siri or Alexa are on the rise and becoming progressively more useful. 
+Also for a large fraction of the population, writing and reading are more challenging than speaking. 
+So being able to process and understand audio is not only convenient, but can help many people access more information. 
+A common task in this domain is automatic speech recognition ASR which converts spoken words to text and enables voice technologies like Siri to answer questions like What is the weather like today?
+The Wav2Vec2 family of models are one of the most recent developments in ASR and use a transformer layer in combination with a CNN as illustrated in Figure 1112. 
+By leveragingmunlabeled data during pretraining, these models achieve competitive results with only a few minutes of labeled data.
 
-Figure 1112. Architecture of wav2vec2.
+The Wav2Vec2 to models are integrated in Transformers and youll not be surprised to learn that loading and using them follows the familiar steps that we have seen throughout this book.
 
-The Wav2Vec2 to models are integrated in Transformers and youll not be surprised to learn
-that loading and using them follows the familiar steps that we have seen throughout this book.
-Lets load a pretrained model that was trained on 960 hours of speech audio
-from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
-processor  Wav2Vec2Processor.from_pretrainedfacebookwav2vec2large960h
-model  Wav2Vec2ForCTC.from_pretrainedfacebookwav2vec2large960h
 
-Notice that for speechtotext tasks like ASR we instantiate a processor which consists of a
-feature extractor and tokenizer. The role of the feature extractor is to convert the continuous
-audio signal into a discrete sequence of vectors that act as the models input, while the
-tokenizer is responsible for deciding the models predictions into text. To apply this model to
-some audio files well use the Librispeech ASR dataset which is the same dataset the model
-was pretrained on. Since the dataset is quite large, well load a small subset with Datasets for
-our demo purposes
-from datasets import load_dataset
-ds  load_datasetpatrickvonplatenlibrispeech_asr_dummy, clean,
-splitvalidation
-ds2
-file Userslewtun.cachehuggingfacedatasetsdownloadsextracted9edc662
- 86cbd144c2df1aa6b0887cd701b2767f0404e7656160b606d316afc71dev_clean12721412
- 3112721412310000.flac,
-Userslewtun.cachehuggingfacedatasetsdownloadsextracted9edc66286cbd144
- c2df1aa6b0887cd701b2767f0404e7656160b606d316afc71dev_clean12721412311272 1412310001.flac,
-text A MAN SAID TO THE UNIVERSE SIR I EXIST,
-SWEAT COVERED BRIONS BODY TRICKLING INTO THE TIGHT LOINCLOTH THAT WAS THE
- ONLY GARMENT HE WORE,
-speaker_id 1272, 1272,
-chapter_id 141231, 141231,
-id 12721412310000, 12721412310001
+Notice that for speechtotext tasks like ASR we instantiate a processor which consists of a feature extractor and tokenizer. 
+The role of the feature extractor is to convert the continuous audio signal into a discrete sequence of vectors that act as the models input, while the tokenizer is responsible for deciding the models predictions into text. 
+To apply this model to some audio files well use the Librispeech ASR dataset which is the same dataset the model was pretrained on. 
+Since the dataset is quite large, well load a small subset with Datasets for our demo purposes.
 
-Here we can see that the audio in the file column is stored in the FLAC coding format, while
-the expected transcription is given by the text column. To convert the audio to an array of
-floats, we can use the SoundFile library to read each file in our dataset with Dataset.map
-import soundfile as sf
-def map_to_arraybatch
-speech, _  sf.readbatchfile
-batchspeech  speech
-return batch
-ds  ds.mapmap_to_array
+Here we can see that the audio in the file column is stored in the FLAC coding format, while the expected transcription is given by the text column. 
+To convert the audio to an array of floats, we can use the SoundFile library to read each file.
 
-If you are using a Jupyter notebook you can easily play the sound files with the following
-Ipython widgets
-from IPython.display import Audio
-displayAudiods0speech, rate16000
-displayAudiods1speech, rate16000
+If you are using a Jupyter notebook you can easily play the sound files with the following.
 
-Finally, we can prepare the inputs with the processor and decode the tokens that have the
-highest probability
-import torch
-inputs  processordsspeech2, return_tensorspt, paddinglongest,
-sampling_rate16000
-logits  modelinputs.input_values.logits
-
-predicted_ids  torch.argmaxlogits, dim1
-transcription  processor.batch_decodepredicted_ids
-printnn.jointranscription
-A MAN SAID TO THE UNIVERSE SIR I EXIST
-SWEAT COVERED BRIONS BODY TRICKLING INTO THE TIGHT LOIN CLOTH THAT WAS THE ONLY
- GARMENT HE WORE
+Finally, we can prepare the inputs with the processor and decode the tokens that have.
 
 This transcription seems to be correct. We can see that some punctuation is missing but this is
-hard to get from audio alone and could be added in a postprocessing step. With only a handful
-of lines of code we can build ourselves a stateoftheart speechtotext application!
+hard to get from audio alone and could be added in a postprocessing step. 
+With only a handful of lines of code we can build ourselves a stateoftheart speechtotext application!
 Building a model for a new language still requires a minimum amount of labeled data which
-can be a challenging feat especially for low resources languages. Soon after the release of
-Wav2Vec2, an approach named Wav2Vec2u13 was published. In this work a combination of
-clever clustering and GAN training is used to build a speechtotext model using only
-independent unlabeled speech and unlabeled text data. This process is visualized in detail in
-Figure 1113. No aligned speech and text data is required at all which enables the training of
-high performant speechtotext models for a much larger spectrum of languages.
+can be a challenging feat especially for low resources languages. 
+Soon after the release of Wav2Vec2, an approach named Wav2Vec2u13 was published. 
+In this work a combination of clever clustering and GAN training is used to build a speechtotext model using only independent unlabeled speech and unlabeled text data. 
+This process is visualized in detail in Figure 1113. 
+No aligned speech and text data is required at all which enables the training of high performant speechtotext models for a much larger spectrum of languages.
 
 Figure 1113. Training scheme for wav2vecU.
 
 Great, so transformers can now read text and hear audio  can they also see? The answer
 is yes and is one of the current research frontiers in the field.
 
-Vision and Text
-Vision and text are another natural pair of modalities to combine since we frequently use
-language to communicate and reason about the contents of images or video. In addition to the
-vision transformers there have been several developments in the direction of combining visual
-and textual information. In this section we will look at four examples of models combining
-vision and text VisualQA, LayoutLM, DALLE, and CLIP.
-VQA
+Vision and text are another natural pair of modalities to combine since we frequently use language to communicate and reason about the contents of images or video. 
+In addition to the vision transformers there have been several developments in the direction of combining visual and textual information. In this section we will look at four examples of models combining vision and text VisualQA, LayoutLM, DALLE, and CLIP.
 
-In Chapter 4 we explored how we can use transformer models to extract answers to textbased
-questions. This can be used both adhoc to extract information from texts or offline, where the
-questionanswering model is used to extract structured information from a set of documents.
-There have been several efforts to expand this approach to vision with datasets such as VQA14
-that is shown in Figure 1114.
+In Chapter 4 we exp
+lored how we can use transformer models to extract answers to textbased questions. 
+This can be used both adhoc to extract information from texts or offline, where the questionanswering model is used to extract structured information from a set of documents.
+There have been several efforts to expand this approach to vision with datasets such as VQA14 that is shown in Figure 1114.
 
-Figure 1114. Example of a visual question answering task from the VQA dataset.
+Example of a visual question answering task from the VQA dataset.
 
-Models such as LXMERT15 and VisualBERT16 use vision models like ResNets to extract
-features from the pictures and then use transformer encoders to combine them with the natural
-questions and predict an answer.
+Models such as LXMERT15 and VisualBERT16 use vision models like ResNets to extract features from the pictures and then use transformer encoders to combine them with the natural questions and predict an answer.
 
-LayoutLM
-Analyzing scanned business documents like receipts, invoices, or reports is another area where
-extracting visual and layout information can be a useful way to recognize text fields of interest.
-Here the LayoutLM family of models is the current stateofthe art and uses an enhanced
-transformer architecture that receives three modalities as input text, image, and layout.
-Accordingly, as shown in Figure 1115 there are embedding layers associated with each
-modality, a spatiallyaware selfattention mechanism, and a mix of image and textimage
-pretraining objectives to align the different modalities. By pretraining on millions of scanned
-documents, LayoutLM models are able to transfer to various downstream tasks in a manner
-similar to BERT for NLP.
+Analyzing scanned business documents like receipts, invoices, or reports is another area where extracting visual and layout information can be a useful way to recognize text fields of interest.
+Here the LayoutLM family of models is the current stateofthe art and uses an enhanced transformer architecture that receives three modalities as input text, image, and layout.
+Accordingly, as shown in Figure 1115 there are embedding layers associated with each modality, a spatiallyaware selfattention mechanism, and a mix of image and textimage pretraining objectives to align the different modalities. 
+By pretraining on millions of scanned documents, LayoutLM models are able to transfer to various downstream tasks in a manner similar to BERT for NLP.
 
-Figure 1115. The model architecture and pretraining strategies for LayoutLMv2.
+The model architecture and pretraining strategies for LayoutLMv2.
 
-DALLE
-A model that combines vision and text for generative tasks is DALLE.17 It uses the GPT
-architecture and autoregressive modeling to generate images from text. Inspired by iGPT it
-regards the words and pixels as one sequence of tokens and is thus able to continue generating
-an image from a text prompt as shown in Figure 1116.
+A model that combines vision and text for generative tasks is DALLE.
+It uses the GPT architecture and autoregressive modeling to generate images from text. 
+Inspired by iGPT it regards the words and pixels as one sequence of tokens and is thus able to continue generating an image from a text prompt as shown in Figure 1116.
 
-Figure 1116. Generation examples with DALLE.
+Generation examples with DALLE.
 
-CLIP
-Finally, lets have a look at CLIP18 that also combines text and vision but is designed for
-supervised tasks. The authors constructed a dataset with 400 million imagecaption pairs and
-used contrastive learning to pretrain the model. The CLIP architecture consists of a text and a
-image encoder both transformers that create embeddings of the captions and images. A batch
-of images with captions is sampled and the contrastive objective is to maximize the similarity
-of the embeddings, as measured by the dotproduct, of the corresponding pair while minimizing
-the similarity of the rest as illustrated in Figure 1117.
-In order to use the pretrained model for classification the possible classes are embedded with
-the text encoder, similar to how we used the zeroshot pipeline. Then the embedding of all the
-classes are compared to the image embedding that we want to classify and the class with the
-highest similarity is chosen.
+Finally, lets have a look at CLIP18 that also combines text and vision but is designed for supervised tasks. 
+The authors constructed a dataset with 400 million imagecaption pairs and used contrastive learning to pretrain the model. 
+The CLIP architecture consists of a text and a image encoder both transformers that create embeddings of the captions and images. 
+A batch of images with captions is sampled and the contrastive objective is to maximize the similarity of the embeddings.
+In order to use the pretrained model for classification the possible classes are embedded with the text encoder, similar to how we used the zeroshot pipeline. 
+Then the embedding of all the classes are compared to the image embedding that we want to classify and the class with the highest similarity is chosen.
 
-Figure 1117. Architecture of CLIP.
+The zeroshot image classification performance of CLIP is remarkable and competitive with fully supervised trained vision models, while being more flexible with regards to new classes.
+CLIP is also fully integrated in Transformers so we can try it out. As before we first load the model and the processor.
 
-The zeroshot image classification performance of CLIP is remarkable and competitive with
-fully supervised trained vision models, while being more flexible with regards to new classes.
-CLIP is also fully integrated in Transformers so we can try it out. As before we first load the
-model and the processor
-from transformers import CLIPProcessor, CLIPModel
-model  CLIPModel.from_pretrainedopenaiclipvitbasepatch32
-processor  CLIPProcessor.from_pretrainedopenaiclipvitbasepatch32
+Then we need a fitting image to try it out. What would be better suited than a picture of Optimus Prime?
 
-Then we need a fitting image to try it out. What would be better suited than a picture of
-Optimus Prime?
-image  Image.openimagesoptimusprime.jpg
-image
 
-Then we need to setup the texts to compare the image against and pass it through the model
-texts  a photo of a transformer, a photo of a robot, a photo of agi
-inputs  processortexttexts, imagesimage, return_tensorspt, paddingTrue
-outputs  modelinputs
-logits_per_image  outputs.logits_per_image
-probs  logits_per_image.softmaxdim1
-probs
-tensor0.9432, 0.0538, 0.0030, grad_fnSoftmaxBackward
+Then we need to setup the texts to compare the image against and pass it through the model texts  a photo of a transformer.
+Well, it almost got that right. Jokes aside, CLIP makes image classification very flexible by being able define classes through text instead of having the classes hardcoded in the model architecture. 
+This concludes the tour of multimodal transformer models.
 
-Well, it almost got that right. Jokes aside, CLIP makes image classification very flexible by
-being able define classes through text instead of having the classes hardcoded in the model
-architecture. This concludes the tour of multimodal transformer models.
+Well thats the end of the ride; thanks for joining us on this journey through the transformers landscape! 
+Throughout this book weve explored ways how transformers can address a wide range of tasks and achieve stateoftheart results. 
+In this chapter weve seen how the current generation of models are being pushed to their limits with scaling and how they are also branching out to new domains and modalities.
+If you want to reinforce the concepts and skills that youve learnt in this book, heres a few ideas for where to go from here.
 
-Where To From Here?
-Well thats the end of the ride; thanks for joining us on this journey through the transformers
-landscape! Throughout this book weve explored ways how transformers can address a wide
-range of tasks and achieve stateoftheart results. In this chapter weve seen how the current
-generation of models are being pushed to their limits with scaling and how they are also
-branching out to new domains and modalities.
-If you want to reinforce the concepts and skills that youve learnt in this book, heres a few
-ideas for where to go from here
-
-Join a Hugging Face sprint
-Hugging Face hosts short sprints focused on improving the libraries in the ecosystem and
-these events are a great way to meet the community and get a taste for opensource software
-development. So far there have been sprints on adding 600 datasets to Datasets, finetuning 300 ASR models in various languages, and implementing hundreds of projects in
-JAXFlax. WHERE CAN WE LINK TO?
+Join a Hugging Face sprint.
+Hugging Face hosts short sprints focused on improving the libraries in the ecosystem and these events are a great way to meet the community and get a taste for opensource software development. 
+So far there have been sprints on adding 600 datasets to Datasets, finetuning 300 ASR models in various languages, and implementing hundreds of projects in JAXFlax. 
+WHERE CAN WE LINK TO?
 
 Build your own project
-One very effective way to test your knowledge in machine learning is to build a project to
-solve a problem that interests you. This could either be reimplementing a transformer
-paper or applying transformers to a novel domain.
+One very effective way to test your knowledge in machine learning is to build a project to solve a problem that interests you. 
+This could either be reimplementing a transformer paper or applying transformers to a novel domain.
 Contribute a model to Transformers
-If youre looking for something more advanced, then contributing a newly published
-architecture to Transformers is a great way to dive into the nuts and bolts of the library.
+If you re looking for something more advanced, then contributing a newly published architecture to Transformers is a great way to dive into the nuts and bolts of the library.
 There is a detailed guide to help you get started in the Transformers documentation.
-Blog about what youve learned
-Teaching others what youve learned is a powerful test of your own knowledge and in some
-sense was one of the driving motivations behind us writing this book! There are great tools
-to get started with technical blogging and we recommend FastPages as you can easily use
-Jupyter notebooks for everything.
-
-1 OpenAIs GPT3 Language Model A Technical Overview, C. Li 2020
-2 Scaling Laws for Neural Language Models, J. Kaplan et al. 2020
-3 The dataset size is measured in the number of tokens, while the model size excludes parameters from the embedding
-layers.
-
-4 Scaling Laws for Autoregressive Generative Modeling, T. Henighan et al. 2020
-5 However, recently a distributed deep learning framework has been proposed that enables smaller groups to pool their
-computational resources and pretrain models in a collaborative fashion.
-6 Efficient Transformers A Survey, Y. Tay et al. 2020
-7 A Survey of Transformers, T. Lin et al 2021
-8 Reporting Bias and Knowledge Extraction, J. Gordon et al. 2013
-9 Generative Pretraining from Pixels, M. Chen et al. 2020
-10 An Image is Worth 16x16 Words Transformers for Image Recognition at Scale, A. Dosovitskiy et al. 2020
-11 Is SpaceTime Attention All You Need for Video Understanding?, G. Bertasius et al. 2021
-12 TAPAS Weakly Supervised Table Parsing via Pretraining, J. Herzig et al. 2020
-13 Unsupervised Speech Recognition, A. Baevski et al. 2021
-14 Making the V in VQA Matter Elevating the Role of Image Understanding in Visual Question Answering, Y. Goyal et a.
-2016
-15 LXMERT Learning CrossModality Encoder Representations from Transformers, H. Tan et al. 2019
-16 VisualBERT A Simple and Performant Baseline for Vision and Language, L. Li et al 2019
-17 ZeroShot TexttoImage Generation, A. Ramesh et al. 2021
-18 Learning Transferable Visual Models From Natural Language Supervision, A. Radford et al. 2021
+Blog about what youve learned.
+Teaching others what youve learned is a powerful test of your own knowledge and in some sense was one of the driving motivations behind us writing this book! 
+There are great tools to get started with technical blogging and we recommend FastPages as you can easily useJupyter notebooks for everything.
 
 About the Authors
-Lewis Tunstall is a machine learning engineer at Hugging Face, focused on
-developing opensource tools and making them accessible to the wider
-community. A former theoretical physicist, he has over 10 years experience
-translating complex subject matter to lay audiences and has taught machine
-learning to university students at both the graduate and undergraduate levels
-Leandro von Werra is a data scientist at Swiss Mobiliar where he leads the
-companys natural language processing efforts to streamline and simplify
-processes for customers and employees. He has experience working across
-the whole machine learning stack, and is the creator of a popular Python
-library that combines Transformers with reinforcement learning. He also
-teaches data science and visualisation at the Bern University of Applied
-Sciences.
+Lewis Tunstall is a machine learning engineer at Hugging Face, focused on developing opensource tools and making them accessible to the wider community. 
+He also teaches data science and visualisation at the Bern University of Applied Sciences.
 Thomas Wolf is Chief Science Officer and cofounder of Hugging Face.
-His team is on a mission to catalyze and democratize NLP research. Prior to
-HuggingFace, Thomas gained a Ph.D. in physics, and later a law degree. He
-worked as a physics researcher and a European Patent Attorney.
+His team is on a mission to catalyze and democratize NLP research. Prior to HuggingFace, Thomas gained a Ph.D. in physics, and later a law degree. 
+He worked as a physics researcher and a European Patent Attorney.
