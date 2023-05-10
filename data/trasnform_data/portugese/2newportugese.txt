@@ -1,284 +1,534 @@
-Capítulo 2
-Classificação de texto Agora imagine que você é um cientista de dados que precisa construir um sistema capaz de identificar automaticamente estados emocionais como “raiva” ou “alegria” que as pessoas expressam em relação ao produto da sua empresa no Twitter
+Capítulo 2. Classificação de texto
+
+Agora imagine que você é um cientista de dados que precisa construir um sistema capaz de identificar automaticamente estados emocionais como “raiva” ou “alegria” que as pessoas expressam em relação ao produto da sua empresa no Twitter.
+
 Até 2018, a abordagem de aprendizado profundo para esse problema normalmente envolvia encontrar uma arquitetura neural adequada para a tarefa e treiná-la do zero em um conjunto de dados de tweets rotulados.
-Essa abordagem sofria de três grandes desvantagens: Você precisava de muitos dados rotulados para treinar modelos precisos, como redes neurais recorrentes ou convolucionais
-Treinar esses modelos do zero era demorado e caro
-O modelo treinado não pode ser facilmente adaptado para uma nova tarefa, e
-g
-com um conjunto diferente de etiquetas
-Hoje em dia, essas limitações são amplamente superadas por meio do aprendizado de transferência, onde normalmente uma arquitetura baseada em Transformer é pré-treinada em uma tarefa genérica, como modelagem de linguagem, e então reutilizada para uma ampla variedade de tarefas downstream.
-Embora o pré-treinamento de um Transformer possa envolver dados significativos e recursos de computação, muitos desses modelos de linguagem são disponibilizados gratuitamente por grandes laboratórios de pesquisa e podem ser facilmente baixados do Hugging FaceModel Hub! BERT, abreviação de Bidirecional Encoder Representations fromTransformers
-1 Este será nosso primeiro encontro com as três bibliotecas principais do ecossistema HuggingFace: Datasets, Tokenizers e Transformers
-Conforme mostrado na Figura 2-2, essas bibliotecas nos permitirão passar rapidamente de texto bruto para um modelo ajustado que pode ser usado para inferência em novos tweets
-Então, no espírito do Optimus Prime, vamos mergulhar, “transform and rollout!”
-Ao contrário da maioria dos conjuntos de dados de análise de sentimentos que envolvem apenas polaridades “positivas” e “negativas”, este conjunto de dados contém seis emoções básicas: raiva, nojo, medo, alegria, tristeza e surpresa
-Dado um tweet, nossa tarefa será treinar um modelo que possa classificá-lo em uma dessas emoções!Uma primeira olhada nos conjuntos de dados de rostos de abraçosUsaremos a biblioteca de conjuntos de dados de rostos de abraços para fazer o download dos dados do Hugging FaceDataset Hub
-Esta biblioteca foi projetada para carregar e processar grandes conjuntos de dados com eficiência, compartilhá-los com a comunidade e simplificar a interoperabilidade entre NumPy, Pandas, PyTorch e TensorFlow
-Ele também contém muitos conjuntos de dados e métricas de benchmark de NLP, como o StanfordQuestion Answering Dataset (SQuAD), General Language Understanding Evaluation (GLUE) e Wikipedia
-Podemos usar a função list_datasets para ver quais conjuntos de dados estão disponíveis no Hub
-Isso se parece com o conjunto de dados que procuramos, então, em seguida, podemos carregá-lo com a função load_dataset de Datasets
-Em cada caso, a estrutura de dados resultante depende do tipo de consulta; embora isso possa parecer estranho no início, faz parte do molho secreto que torna os conjuntos de dados tão flexíveis! Então, agora que vimos como carregar e inspecionar dados com conjuntos de dados, vamos fazer algumas verificações de sanidade sobre o conteúdo de nossos tweets
-De conjuntos de dados a quadros de dados Embora os conjuntos de dados forneçam muitas funcionalidades de baixo nível para dividir nossos dados, muitas vezes é conveniente converter um objeto Dataset em um Pandas DataFrame para que possamos acessar APIs de alto nível para visualização de dados
-Para habilitar a conversão, Datasets fornece aDataset
-função set_format que nos permite alterar o formato de saída do conjunto de dados
-Isto não altera o formato de dados subjacente que é o Apache Arrow e vocêpoderámudar para outro formato mais tarde se necessário
-Como podemos ver, os cabeçalhos das colunas foram preservados e as primeiras linhas correspondem às nossas visualizações anteriores dos dados
-Antes de mergulhar na construção de um classificador, vamos dar uma olhada no conjunto de dados
-Como disse AndrejKarpathy, tornar-se “um com os dados”3 é essencial para construir grandes modelos
-Observe a distribuição de classes Sempre que você estiver trabalhando em problemas de classificação de texto, é uma boa ideia examinar a distribuição de exemplos entre cada classe
-Por exemplo, um conjunto de dados com uma distribuição de classe assimétrica pode exigir um tratamento diferente em termos de perda de treinamento e métricas de avaliação do que um balanceado
-Podemos ver que o conjunto de dados está fortemente desequilibrado; as classes de alegria e tristeza aparecem com frequência, enquanto o amor e a tristeza são cerca de 5 a 10 vezes mais raros
-Existem várias maneiras de lidar com dados desequilibrados, como reamostrar as classes minoritárias ou majoritárias
-Alternativamente, também podemos ponderar a função de perda para contabilizar as classes sub-representadas
-No entanto, para manter as coisas simples nesta primeira aplicação prática, deixamos essas técnicas como um exercício para o leitor e passamos a examinar o comprimento de nossos tweets
-Qual é a duração de nossos tweets? Os modelos Transformer têm um comprimento máximo de sequência de entrada que é referido como o tamanho máximo do contexto
-Para a maioria dos aplicativos com BERT, o tamanho máximo do contexto é de 512 tokens, onde um token é definido pela escolha do tokenizador e pode ser uma palavra, subpalavra ou caractere
-Vamos fazer uma estimativa aproximada da duração de nossos tweets por emoção observando a distribuição de palavras por tweet
-No gráfico, vemos que, para cada emoção, a maioria dos tweets tem cerca de 15 palavras e os tweets mais longos estão bem abaixo do tamanho máximo de contexto do BERT de 512 tokens
-Textos maiores que a janela de contexto de um modelo precisam ser truncados, o que pode levar a uma perda de desempenho se o texto truncado contiver informações cruciais
-Vamos agora descobrir como podemos converter esses textos brutos em um formato adequado para Transformers! De Texto para Tokens Modelos de transformadores como BERT não podem receber strings brutas como entrada; em vez disso, eles assumem que o texto foi tokenizado em vetores numéricos
-A tokenização é a etapa de quebrar uma string nas unidades atômicas usadas no modelo
-Existem várias estratégias de tokenização que podem ser adotadas e a divisão ideal de palavras em subunidades geralmente é aprendida no corpus
-Antes de olhar para o tokenizador usado para o BERT, vamos motivá-lo observando dois casos extremos: tokenizadores de caracteres e palavras
-Tokenização de caracteresO esquema de tokenização mais simples é alimentar cada caractere individualmente para o modelo
-No Python, os objetos str são realmente arrays sob o capô, o que nos permite implementar rapidamente a tokenização em nível de caractere com apenas uma linha de código
-Este é um bom começo, mas ainda não terminamos porque nosso modelo espera que cada caractere seja convertido em um número inteiro, um processo chamado de numeração
-Estamos quase terminando! Cada token foi mapeado para um identificador numérico exclusivo, daí o nome input_ids
-A última etapa é converter input_ids em um tensor 2D de vetores one-hot que são mais adequados para redes neurais do que a representação categórica de input_ids
-A razão para isso é que os elementos de input_ids criam uma escala ordinal, portanto, adicionar ou subtrair dois IDs é uma operação sem sentido, pois o resultado é um novo ID que representa outro token aleatório
-Por outro lado, o resultado da adição de duas codificações one-hot pode ser facilmente interpretado: as duas entradas que são “hot” indicam que os dois tokens correspondentes ocorrem simultaneamente
-A partir do nosso exemplo simples, podemos ver que a tokenização em nível de caractere ignora qualquer estrutura nos textos, como palavras, e os trata apenas como fluxos de caracteres
+
+Essa abordagem sofria de três grandes desvantagens:
+
+Você precisava de muitos dados rotulados para treinar modelos precisos, como redes neurais recorrentes ou convolucionais.
+
+O treinamento desses modelos a partir do zero era demorado e caro.
+
+O modelo treinado não pôde ser facilmente adaptado a uma nova tarefa, por exemplo, com um conjunto diferente de rótulos.
+
+Hoje em dia, essas limitações são amplamente superadas por meio do aprendizado de transferência, onde normalmente uma arquitetura baseada em Transformer é pré-treinada em uma tarefa genérica, como modelagem de linguagem, e depois reutilizada para uma ampla variedade de tarefas downstream.
+
+Embora o pré-treinamento de um Transformer possa envolver dados significativos e recursos de computação, muitos desses modelos de linguagem são disponibilizados gratuitamente por grandes laboratórios de pesquisa e podem ser facilmente baixados do Hugging Face Model Hub!
+
+Este capítulo irá guiá-lo através de várias abordagens para a detecção de emoções usando um famoso modelo Transformer chamado BERT, abreviação de Bidirectional Encoder Representations from Transformers.
+
+Este será nosso primeiro encontro com as três bibliotecas principais do ecossistema Hugging Face: conjuntos de dados, tokenizadores e transformadores.
+Conforme mostrado na Figura 2-2, essas bibliotecas nos permitirão ir rapidamente de texto bruto para um modelo ajustado que pode ser usado para inferência em novos tweets. Então, no espírito do Optimus Prime, vamos mergulhar, “transformar e lançar!”
+
+O conjunto de dados Para construir nosso detector de emoções, usaremos um ótimo conjunto de dados de um artigo2 que explorou como as emoções são representadas em mensagens do Twitter em inglês.
+
+Ao contrário da maioria dos conjuntos de dados de análise de sentimentos que envolvem apenas polaridades “positivas” e “negativas”, este conjunto de dados contém seis emoções básicas: raiva, nojo, medo, alegria, tristeza e surpresa. Dado um tweet, nossa tarefa será treinar um modelo que possa classificá-lo em uma dessas emoções!
+
+Uma primeira olhada nos conjuntos de dados de rostos de abraços Usaremos a biblioteca de conjuntos de dados de rostos de abraços para baixar os dados do Hub do conjunto de dados de rostos de abraços.
+
+Essa biblioteca foi projetada para carregar e processar grandes conjuntos de dados com eficiência, compartilhá-los com a comunidade e simplificar a interoperabilidade entre NumPy, Pandas, PyTorch e TensorFlow.
+
+Ele também contém muitos conjuntos de dados e métricas de referência de NLP, como o conjunto de dados de resposta a perguntas de Stanford (SQuAD), avaliação geral de compreensão de linguagem (GLUE) e Wikipedia.
+
+Podemos usar a função list_datasets para ver quais conjuntos de dados estão disponíveis no Hub.
+
+Isso se parece com o conjunto de dados que procuramos, então, em seguida, podemos carregá-lo com a função load_dataset de Datasets.
+
+Em cada caso, a estrutura de dados resultante depende do tipo de consulta; embora isso possa parecer estranho no começo, é parte do molho secreto que torna os conjuntos de dados tão flexíveis!
+
+Então, agora que vimos como carregar e inspecionar dados com conjuntos de dados, vamos fazer algumas verificações de sanidade sobre o conteúdo de nossos tweets.
+
+De conjuntos de dados a quadros de dados Embora os conjuntos de dados forneçam muitas funcionalidades de baixo nível para dividir e dividir nossos dados, muitas vezes é conveniente converter um objeto Dataset em um Pandas DataFrame para que possamos acessar APIs de alto nível para visualização de dados.
+
+Para habilitar a conversão, Datasets fornece uma função Dataset.set_format que nos permite alterar o formato de saída do Dataset.
+
+Isso não altera o formato de dados subjacente, que é o Apache Arrow, e você pode alternar para outro formato posteriormente, se necessário.
+
+Como podemos ver, os cabeçalhos das colunas foram preservados e as primeiras linhas correspondem às nossas visualizações anteriores dos dados.
+
+Antes de mergulhar na construção de um classificador, vamos dar uma olhada no conjunto de dados.
+
+Como disse Andrej Karpathy, tornar-se “um com os dados”3 é essencial para construir grandes modelos.
+
+Observe a distribuição de classes Sempre que estiver trabalhando em problemas de classificação de texto, é uma boa ideia examinar a distribuição de exemplos entre cada classe.
+
+Por exemplo, um conjunto de dados com uma distribuição de classe assimétrica pode exigir um tratamento diferente em termos de perda de treinamento e métricas de avaliação do que um balanceado.
+
+Podemos ver que o conjunto de dados está fortemente desequilibrado; as classes de alegria e tristeza aparecem com frequência, enquanto o amor e a tristeza são cerca de 5 a 10 vezes mais raros.
+
+Existem várias maneiras de lidar com dados desequilibrados, como reamostrar as classes minoritárias ou majoritárias.
+
+Alternativamente, também podemos ponderar a função de perda para contabilizar as classes sub-representadas.
+
+No entanto, para manter as coisas simples nesta primeira aplicação prática, deixamos essas técnicas como um exercício para o leitor e passamos a examinar o comprimento de nossos tweets.
+
+Quanto tempo duram nossos tweets?
+
+Os modelos de transformadores têm um comprimento máximo de sequência de entrada que é referido como o tamanho máximo do contexto. Para a maioria dos aplicativos com BERT, o tamanho máximo do contexto é de 512 tokens, onde um token é definido pela escolha do tokenizador e pode ser uma palavra, subpalavra ou caractere.
+
+Vamos fazer uma estimativa aproximada de nossos comprimentos de tweet por emoção, observando a distribuição de palavras por tweet.
+
+A partir do gráfico, vemos que, para cada emoção, a maioria dos tweets tem cerca de 15 palavras e os tweets mais longos estão bem abaixo do tamanho máximo de contexto do BERT de 512 tokens.
+
+Textos maiores que a janela de contexto de um modelo precisam ser truncados, o que pode levar a uma perda de desempenho se o texto truncado contiver informações cruciais.
+
+Vamos agora descobrir como podemos converter esses textos brutos em um formato adequado para Transformers!
+
+De texto para tokens Modelos de transformador como BERT não podem receber strings brutas como entrada; em vez disso, eles assumem que o texto foi tokenizado em vetores numéricos.
+
+A tokenização é a etapa de quebrar uma string nas unidades atômicas usadas no modelo. Existem várias estratégias de tokenização que podem ser adotadas e a divisão ideal de palavras em subunidades geralmente é aprendida no corpus.
+
+Antes de olhar para o tokenizador usado para o BERT, vamos motivá-lo observando dois casos extremos: tokenizadores de caracteres e palavras.
+
+Tokenização de caracteres O esquema de tokenização mais simples é alimentar cada caractere individualmente para o modelo.
+
+Em Python, os objetos str são realmente arrays sob o capô, o que nos permite implementar rapidamente a tokenização em nível de caractere com apenas uma linha de código.
+
+Este é um bom começo, mas ainda não terminamos porque nosso modelo espera que cada caractere seja convertido em um número inteiro, um processo chamado de numeração.
+
+Estamos quase terminando! Cada token foi mapeado para um identificador numérico exclusivo, daí o nome input_ids. A última etapa é converter input_ids em um tensor 2D de vetores one-hot que são mais adequados para redes neurais do que a representação categórica de input_ids.
+
+A razão para isso é que os elementos de input_ids criam uma escala ordinal, portanto, adicionar ou subtrair dois IDs é uma operação sem sentido, pois resulta em um novo ID que representa outro token aleatório.
+
+Por outro lado, o resultado da adição de duas codificações one-hot pode ser facilmente interpretado: as duas entradas que são “hot” indicam que os dois tokens correspondentes ocorrem simultaneamente.
+
+A partir de nosso exemplo simples, podemos ver que a tokenização em nível de caractere ignora qualquer estrutura nos textos, como palavras, e as trata apenas como fluxos de caracteres.
+
 Embora isso ajude a lidar com erros ortográficos e palavras raras, a principal desvantagem é que estruturas linguísticas, como palavras, precisam ser aprendidas e esse processo requer computação e memória significativas.
-Por esse motivo, a tokenização de caracteres raramente é usada na prática
-Em vez disso, alguma estrutura do texto, como palavras, é preservada durante a etapa de tokenização
-A tokenização de palavras é uma abordagem direta para conseguir isso - vamos dar uma olhada em como funciona! Tokenização de palavras Em vez de dividir o texto em caracteres, podemos dividi-lo em palavras e mapear cada palavra para um número inteiro
-Ao usar palavras desde o início, o modelo pode pular a etapa de aprender as palavras dos personagens e, assim, eliminar a complexidade do processo de treinamento
-A partir daqui, podemos seguir os mesmos passos que fizemos para o tokenizador de caracteres e mapear cada palavra para um identificador exclusivo
-No entanto, já podemos ver um problema potencial com esse esquema de tokenização; pontuação não é contabilizada, então PNL
-é tratado como um único token
-Dado que as palavras podem incluir declinações, conjugações ou erros ortográficos, o tamanho do vocabulário pode facilmente crescer para milhões! NOTAExistem variações de tokenizadores de palavras que possuem regras extras para pontuação
-Pode-se também aplicar a derivação que normaliza as palavras ao seu radical (e
-g
-“ótimo”, “maior” e “maior” tornam-se “ótimos”) à custa de perder algumas informações no texto
-A razão pela qual ter um grande vocabulário é um problema é que requer redes neurais com um número enorme de parâmetros
-Para ilustrar isso, suponha que temos 1 milhão de palavras únicas e queremos comprimir os vetores de entrada de 1 milhão de dimensões para vetores de mil dimensões na primeira camada de uma rede neural
-Este é um passo padrão na maioria das arquiteturas NLP e a matriz de peso resultante deste vetor conteria 1 milhão × 1 mil pesos = 1 bilhão de pesos
-Isso já é comparável ao maior modelo GPT-2 que tem 1
-4 bilhões de parâmetros no total! Naturalmente, queremos evitar tanto desperdício com nossos parâmetros de modelo, pois eles são caros para treinar e modelos maiores são mais difíceis de manter
-Uma abordagem comum é limitar o vocabulário e descartar palavras raras considerando, digamos, as 100.000 palavras mais comuns no corpus
-Palavras que não fazem parte do vocabulário são classificadas como “desconhecidas” e mapeadas para um token UNK compartilhado
-Isso significa que perdemos algumas informações potencialmente importantes no processo de tokenização de palavras, pois o modelo não possui informações sobre quais palavras foram associadas aos tokens UNK
-Não seria bom se houvesse um compromisso entre tokenização de caracteres e palavras que preservasse todas as informações de entrada e parte da estrutura de entrada? Há! Vejamos as ideias principais por trás da tokenização de subpalavras
-Tokenização de subpalavras A ideia por trás da tokenização de subpalavras é tirar o melhor dos dois mundos da tokenização de caracteres e palavras
-Por um lado, queremos usar caracteres, pois eles permitem que o modelo lide com combinações raras de caracteres e erros ortográficos
-Por outro lado, queremos manter palavras frequentes e partes de palavras como entidades únicas
-AVISO Alterar a tokenização de um modelo após o pré-treinamento seria catastrófico, pois as representações de palavras e subpalavras aprendidas se tornariam obsoletas! A biblioteca Transformers fornece funções para garantir que o righttokenizer seja carregado para o Transformer correspondente
-Existem vários algoritmos de tokenização de subpalavras, como Byte-Pair-Encoding, WordPiece, Unigram e SentencePiece
-A maioria deles adota uma estratégia semelhante:Tokenização simplesO corpus de texto é dividido em palavras, geralmente de acordo com espaços em branco e regras de pontuação
-ContagemTodas as palavras do corpus são contadas e a contagem é armazenada
-DivisãoAs palavras na contagem são divididas em subpalavras
-Inicialmente são personagens
-Contagem de pares de subpalavrasUsando a contagem, os pares de subpalavras são contados
-Fusão Com base em uma regra, alguns dos pares de subpalavras são mesclados no corpus
-ParandoO processo é interrompido quando um tamanho de vocabulário predefinido é atingido
-Existem diversas variações deste procedimento nos algoritmos acima e o TokenizerSummary na documentação do Transformers fornece informações detalhadas sobre cada estratégia de tokenização
-A principal característica distintiva da tokenização de subpalavras (assim como da tokenização de palavras) é que ela é aprendida a partir do corpus usado para pré-treinamento
+
+Por esse motivo, a tokenização de caracteres raramente é usada na prática. Em vez disso, alguma estrutura do texto, como palavras, é preservada durante a etapa de tokenização.
+
+A tokenização do Word é uma abordagem direta para conseguir isso - vamos dar uma olhada em como isso funciona!
+
+Tokenização de palavras Em vez de dividir o texto em caracteres, podemos dividi-lo em palavras e mapear cada palavra para um número inteiro.
+
+Ao usar palavras desde o início, o modelo pode pular a etapa de aprender as palavras dos personagens e, assim, eliminar a complexidade do processo de treinamento.
+
+A partir daqui, podemos seguir os mesmos passos que fizemos para o tokenizador de caracteres e mapear cada palavra para um identificador exclusivo.
+
+No entanto, já podemos ver um problema potencial com esse esquema de tokenização; pontuação não é contabilizada, então NLP. é tratado como um único token.
+
+Dado que as palavras podem incluir declinações, conjugações ou erros ortográficos, o tamanho do vocabulário pode facilmente crescer para milhões!
+
+Existem variações de tokenizadores de palavras que possuem regras extras para pontuação. Pode-se também aplicar a derivação que normaliza as palavras para sua raiz (por exemplo, “grande”, “maior” e “maior” tornam-se “ótimos”) à custa de perder algumas informações no texto.
+
+A razão pela qual ter um grande vocabulário é um problema é que requer redes neurais com um número enorme de parâmetros.
+
+Para ilustrar isso, suponha que temos 1 milhão de palavras únicas e queremos comprimir os vetores de entrada de 1 milhão de dimensões para vetores de mil dimensões na primeira camada de uma rede neural.
+
+Esta é uma etapa padrão na maioria das arquiteturas NLP e a matriz de peso resultante desse vetor conteria 1 milhão × 1 mil pesos = 1 bilhão de pesos.
+
+Isso já é comparável ao maior modelo GPT-2, que possui 1,4 bilhão de parâmetros no total! Naturalmente, queremos evitar tanto desperdício com nossos parâmetros de modelo, pois eles são caros para treinar e modelos maiores são mais difíceis de manter.
+
+Uma abordagem comum é limitar o vocabulário e descartar palavras raras considerando, digamos, as 100.000 palavras mais comuns do corpus. As palavras que não fazem parte do vocabulário são classificadas como “desconhecidas” e mapeadas para um token UNK compartilhado.
+
+Isso significa que perdemos algumas informações potencialmente importantes no processo de tokenização de palavras, pois o modelo não possui informações sobre quais palavras foram associadas aos tokens UNK.
+
+Não seria bom se houvesse um compromisso entre tokenização de caracteres e palavras que preservasse todas as informações de entrada e parte da estrutura de entrada? Há! Vejamos as principais ideias por trás da tokenização de subpalavras.
+
+A ideia por trás da tokenização de subpalavras é tirar o melhor dos dois mundos da tokenização de caracteres e palavras.
+
+Por um lado, queremos usar caracteres, pois eles permitem que o modelo lide com combinações raras de caracteres e erros ortográficos.
+
+Por outro lado, queremos manter palavras frequentes e partes de palavras como entidades únicas.
+
+Alterar a tokenização de um modelo após o pré-treinamento seria catastrófico, pois as representações de palavras e subpalavras aprendidas se tornariam obsoletas! A biblioteca Transformers fornece funções para garantir que o tokenizer correto seja carregado para o Transformer correspondente.
+
+Existem vários algoritmos de tokenização de subpalavra, como Byte-Pair-Encoding, WordPiece, Unigram e SentencePiece.
+
+A maioria deles adota uma estratégia semelhante: tokenização simples
+
+O corpus de texto é dividido em palavras, geralmente de acordo com as regras de espaço em branco e pontuação. Contagem Todas as palavras do corpus são contadas e a contagem é armazenada.
+
+Divisão As palavras na contagem são divididas em subpalavras. Inicialmente, esses são personagens. Contagem de pares de subpalavras Usando a contagem, os pares de subpalavras são contados.
+
+Fusão Com base em uma regra, alguns dos pares de subpalavras são mesclados no corpus.
+
+Parando O processo é interrompido quando um tamanho de vocabulário predefinido é atingido.
+Existem várias variações desse procedimento nos algoritmos acima e no resumo do tokenizer na documentação dos Transformers fornece informações detalhadas sobre cada estratégia de tokenização.
+
+A principal característica distintiva da tokenização de subpalavras (assim como da tokenização de palavras) é que ela é aprendida a partir do corpus usado para o pré-treinamento.
+
+
 Vamos dar uma olhada em como a tokenização de subpalavra realmente funciona usando a biblioteca Hugging Face Transformers!
-A biblioteca Transformers fornece uma função conveniente de_pretreinada que pode ser usada para carregar ambos os objetos, seja do HuggingFace Model Hub ou de um caminho local
-Para construir nosso detector de emoções, usaremos uma variante BERT chamada DistilBERT,4 que é uma versão reduzida do modelo BERT original
-A principal vantagem deste modelo é que ele atinge um desempenho comparável ao BERT, sendo significativamente menor e mais eficiente
-Isso nos permite treinar um modelo em alguns minutos e, se você quiser treinar um modelo BERT maior, basta alterar o model_name do modelo pré-treinado
-A interface do model e do tokenizer serão as mesmas, o que destaca a flexibilidade da biblioteca Transformers; podemos experimentar uma grande variedade de modelos Transformer apenas alterando o nome do modelo pré-treinado no código! DICA É uma boa ideia começar com um modelo menor para que você possa construir rapidamente um protótipo funcional
-Depois de ter certeza de que o pipeline está funcionando de ponta a ponta, você pode experimentar modelos maiores para obter ganhos de desempenho
-onde a classe AutoTokenizer garante que emparelhemos o tokenizer e o vocabulário corretos com a arquitetura do modelo
-Podemos examinar alguns atributos do tokenizador, como o tamanho do vocabulário: Podemos observar duas coisas
-Primeiro, os tokens [CLS] e [SEP] foram adicionados automaticamente ao início e ao final da sequência e, segundo, o teste complicado de palavras longas foi dividido em dois tokens
-O prefixo ## em ##test significa que a string anterior não é um espaço em branco e que deve ser mesclada com o token anterior
-Agora que temos uma compreensão básica do processo de tokenização, podemos usar o tokenizador para alimentar os tweets ao modelo
-Treinando um Classificador de Texto Conforme discutido no Capítulo 2, os modelos BERT são pré-treinados para prever palavras mascaradas em uma sequência de texto
-No entanto, não podemos usar esses modelos de linguagem diretamente para classificação de texto; portanto, precisamos modificá-los um pouco
-Para entender quais modificações são necessárias, vamos revisitar a arquitetura BERT representada na Figura 2-3
-Primeiro, o texto é tokenizado e representado como vetores one-hot cuja dimensão é o tamanho do vocabulário tokenizer, geralmente consistindo de 50k-100k tokens únicos
-Em seguida, essas codificações de token são incorporadas em dimensões inferiores e passadas pelas camadas do bloco codificador para produzir um estado oculto para cada token de entrada
-Para o objetivo de pré-treinamento da modelagem de linguagem, cada estado oculto é conectado a uma camada que prevê o token para o token de entrada, que é apenas não trivial se o token de entrada foi mascarado
-Para a tarefa de classificação, substituímos a camada de modelagem de linguagem por uma camada de classificação
-As sequências BERT sempre começam com um token de classificação [CLS], portanto, usamos o estado oculto para o token de classificação como entrada para nossa camada de classificação
-OBSERVAÇÃONa prática, o PyTorch pula a etapa de criação de um vetor one-hot porque multiplicar uma matriz por um vetor one-hot é o mesmo que extrair uma coluna da matriz de incorporação
-Isso pode ser feito diretamente obtendo a coluna com o ID do token da matriz
-Temos duas opções para treinar tal modelo em nosso conjunto de dados do Twitter: Extração de recursos Usamos os estados ocultos como recursos e apenas treinamos um classificador neles
-Ajuste finoTreinamos todo o modelo de ponta a ponta, que também atualiza os parâmetros do modelo pré-treinadoBERT
-Nesta seção, exploramos as duas opções para o DistilBert e examinamos suas compensações
-Transformadores como extratores de recursos Usar um Transformer como um extrator de recursos é bastante simples; conforme mostrado na Figura 2-4, congelamos os pesos do corpo durante o treinamento e usamos os estados ocultos como recursos para o classificador
-A vantagem dessa abordagem é que podemos treinar rapidamente um modelo pequeno ou raso
-Esse modelo pode ser uma camada de classificação neural ou um método que não depende de gradientes como uma Floresta Aleatória
-Este método é especialmente conveniente se as GPUs não estiverem disponíveis, pois os estados ocultos podem ser calculados relativamente rápido em uma CPU
-Figura 2-4
-Na abordagem baseada em recursos, o modelo BERT é congelado e apenas fornece recursos para um classificador
-O método baseado em características baseia-se na suposição de que os estados ocultos capturam todas as informações necessárias para a tarefa de classificação
+
+Usando tokenizadores pré-treinados Observamos que carregar o tokenizador pré-treinado correto para um determinado modelo pré-treinado é crucial para obter resultados sensatos.
+
+A biblioteca Transformers fornece uma conveniente função from_pretrained que pode ser usada para carregar ambos os objetos, seja do Hugging Face Model Hub ou de um caminho local.
+
+Para construir nosso detector de emoções, usaremos uma variante BERT chamada DistilBERT, que é uma versão reduzida do modelo BERT original.
+
+A principal vantagem desse modelo é que ele atinge desempenho comparável ao BERT, sendo significativamente menor e mais eficiente.
+
+Isso nos permite treinar um modelo em alguns minutos e, se você quiser treinar um modelo BERT maior, basta alterar o model_name do modelo pré-treinado.
+
+A interface do model e do tokenizer será a mesma, o que destaca a flexibilidade da biblioteca Transformers; podemos experimentar uma ampla variedade de modelos Transformer apenas alterando o nome do modelo pré-treinado no código!
+
+É uma boa ideia começar com um modelo menor para que você possa construir rapidamente um protótipo funcional.
+
+Depois de ter certeza de que o pipeline está funcionando de ponta a ponta, você pode experimentar modelos maiores para obter ganhos de desempenho.
+
+onde a classe AutoTokenizer garante que emparelhemos o tokenizador e o vocabulário corretos com a arquitetura do modelo.
+
+Podemos examinar alguns atributos do tokenizador, como o tamanho do vocabulário:
+
+Podemos observar duas coisas. Primeiro, os tokens [CLS] e [SEP] foram adicionados automaticamente ao início e ao final da sequência e, segundo, a palavra complicada complicadtest foi dividida em dois tokens.
+
+O prefixo ## em ##test significa que a string anterior não é um espaço em branco e que deve ser mesclada com o token anterior.
+
+Agora que temos uma compreensão básica do processo de tokenização, podemos usar o tokenizer para alimentar tweets no modelo.
+
+Treinando um classificador de texto
+
+Conforme discutido no Capítulo 2, os modelos BERT são pré-treinados para prever palavras mascaradas em uma sequência de texto.
+
+No entanto, não podemos usar esses modelos de linguagem diretamente para classificação de texto; portanto, precisamos modificá-los um pouco.
+
+Para entender quais modificações são necessárias, vamos revisitar a arquitetura BERT representada na Figura 2-3.
+
+Primeiro, o texto é tokenizado e representado como vetores one-hot cuja dimensão é o tamanho do vocabulário tokenizer, geralmente consistindo de 50k-100k tokens únicos.
+
+Em seguida, essas codificações de token são incorporadas em dimensões inferiores e passadas pelas camadas do bloco do codificador para produzir um estado oculto para cada token de entrada.
+
+Para o objetivo de pré-treinamento da modelagem de linguagem, cada estado oculto é conectado a uma camada que prevê o token para o token de entrada, que só é não trivial se o token de entrada foi mascarado.
+
+Para a tarefa de classificação, substituímos a camada de modelagem de linguagem por uma camada de classificação.
+
+As sequências BERT sempre começam com um token de classificação [CLS], portanto, usamos o estado oculto para o token de classificação como entrada para nossa camada de classificação.
+
+Na prática, o PyTorch pula a etapa de criação de um vetor one-hot porque multiplicar uma matriz por um vetor one-hot é o mesmo que extrair uma coluna da matriz de incorporação.
+
+Isso pode ser feito diretamente obtendo a coluna com o ID do token da matriz.
+
+Temos duas opções para treinar tal modelo em nosso conjunto de dados do Twitter:
+
+Usamos os estados ocultos como recursos e apenas treinamos um classificador neles.
+
+Ajuste fino Treinamos todo o modelo de ponta a ponta, que também atualiza os parâmetros do modelo BERT pré-treinado.
+
+Nesta seção, exploramos as duas opções para o DistilBert e examinamos suas compensações.
+
+Transformadores como extratores de recursos. Usar um Transformer como extrator de recursos é bastante simples; conforme mostrado na Figura 2-4, congelamos os pesos do corpo durante o treinamento e usamos os estados ocultos como recursos para o classificador.
+
+A vantagem dessa abordagem é que podemos treinar rapidamente um modelo pequeno ou raso.
+
+Esse modelo pode ser uma camada de classificação neural ou um método que não depende de gradientes, como uma Random Forest.
+
+Esse método é especialmente conveniente se as GPUs não estiverem disponíveis, pois os estados ocultos podem ser computados de forma relativamente rápida em uma CPU.
+
+Figura 2-4. Na abordagem baseada em características, o modelo BERT é congelado e apenas fornece características para um classificador.
+
+O método baseado em características baseia-se na suposição de que os estados ocultos capturam todas as informações necessárias para a tarefa de classificação.
+
 No entanto, se alguma informação não for necessária para a tarefa de pré-treinamento, ela pode não ser codificada no estado oculto, mesmo que seja crucial para a tarefa de classificação.
-Nesse caso, o modelo de classificação precisa trabalhar com dados abaixo do ideal e é melhor usar a abordagem de ajuste fino discutida na seção a seguir
-Aqui, usamos o PyTorch para verificar se uma GPU está disponível e, em seguida, encadeamos o PyTorchnn
-Módulo
-método to("cuda") para o carregador de modelo; sem isso, executaríamos o modelo na CPU que pode ser consideravelmente mais lenta
-A classe AutoModel corresponde ao codificador de entrada que converte os vetores one-hot em incorporações com codificações posicionais e os alimenta através da pilha do codificador para retornar os estados ocultos
-O cabeçalho do modelo de linguagem que pega os estados ocultos e os decodifica para a previsão do token mascarado é excluído, pois é necessário apenas para o pré-treinamento
-Se você quiser usar essa cabeça de modelo, você pode carregar o modelo completo com AutoModelForMaskedLM
-Agora podemos passar este tensor para o modelo para extrair os estados ocultos
-Dependendo da configuração do modelo, a saída pode conter vários objetos, como estados ocultos, perdas ou atenções, que são organizados em uma classe semelhante a uma tupla nomeada em Python
-Em nosso exemplo, a saída do modelo é uma classe de dados Python chamada BaseModelOutput e, como qualquer classe, podemos acessar os atributos pelo nome
-Como o modelo atual retorna apenas uma entrada que é o último estado oculto, vamos passar o texto codificado e examinar as saídas: Olhando para o tensor do estado oculto, vemos que ele tem a forma [batch_size, n_tokens,hidden_dim]
-A maneira como o BERT funciona é que um estado oculto é retornado para cada entrada, e o modelo usa esses estados ocultos para prever tokens mascarados na tarefa de pré-treinamento
-Para tarefas de classificação, é prática comum usar o estado oculto associado ao token [CLS] como o recurso de entrada, localizado na primeira posição na segunda dimensão
-Tokenizando todo o conjunto de dados Agora que sabemos como extrair os estados ocultos de uma única string, vamos tokenizar todo o conjunto de dados! Para fazer isso, podemos escrever uma função simples que irá tokenizar nossos exemplos
-vemos que o resultado é um dicionário, onde cada valor é uma lista de listas geradas pelo tokenizador
-Em particular, cada sequência em input_ids começa com 101 e termina com 102, seguido de zeros, correspondendo aos tokens [CLS], [SEP] e [PAD] respectivamente: Observe também que, além de retornar os tweets codificados como input_ids, o tokenizer também retorna a lista de arrays de Attention_mask
-Isso ocorre porque não queremos que o modelo fique confuso com os tokens de preenchimento adicionais, portanto, a máscara de atenção permite que o modelo ignore as partes preenchidas da entrada
-Consulte a Figura 2-5 para obter uma explicação visual sobre como os IDs de entrada e as máscaras de atenção são formatados
-AVISOS Como os tensores de entrada são empilhados apenas ao serem passados ​​para o modelo, é importante que o tamanho do lote da tokenização e do treinamento correspondam e que não haja embaralhamento
-Caso contrário, os tensores de entrada podem não ser empilhados porque têm comprimentos diferentes
-Isso acontece porque eles são preenchidos até o comprimento máximo do lote de tokenização, que pode ser diferente para cada lote
-Em caso de dúvida, defina batch_size=None na etapa de tokenização, pois isso aplicará a tokenização globalmente e todos os tensores de entrada terão o mesmo comprimento
-Isso, no entanto, usará mais memória
-Apresentaremos uma alternativa a esta abordagem com uma função de agrupamento que apenas une os tensores quando eles são necessários e os preenche de acordo
-Para aplicar nossa função tokenize a todo o corpus de emoções, usaremos o DatasetDict
-função de mapa
-Isso aplicará o tokenize em todas as divisões do corpus, portanto, nossos dados de treinamento, validação e teste serão pré-processados ​​em uma única linha de código:emotions_encoded = emoções
-map(tokenize, batched=True, batch_size=None) Por padrão, DatasetDict
-map opera individualmente em cada exemplo do corpus, portanto, a configuração batched=True codificará os tweets em lotes, enquanto batch_size=Noneaplica nossa função tokenize em um único lote e garante que os tensores de entrada e as máscaras de atenção tenham a mesma forma globalmente
-Podemos ver que esta operação adicionou dois novos recursos ao conjunto de dados: input_ids e a máscara de atenção
-De IDs de entrada a estados ocultos Agora que convertemos nossos tweets em entradas numéricas, a próxima etapa é extrair os últimos estados ocultos para que possamos alimentá-los a um classificador
-Se tivéssemos um único exemplo, poderíamos simplesmente passar os input_ids e a atenção_mask para o modelo como segue, mas o que realmente queremos são os estados ocultos em todo o conjunto de dados
-Para isso, podemos usar o DatasetDict
-função de mapa novamente! Vamos definir uma função forward_pass que pega um lote de IDs de entrada e máscaras de atenção, os alimenta no modelo e adiciona um novo recurso hidden_state ao nosso lote
-Criando uma Matriz de RecursosO conjunto de dados pré-processado agora contém todas as informações necessárias para treinar um classificador nele
-Usaremos os estados ocultos como recursos de entrada e os rótulos como alvos
-Podemos criar facilmente os arrays correspondentes no conhecido formato Scikit-Learn da seguinte forma
-Redução de Dimensionalidade com UMAPBAntes de treinarmos um modelo nos estados ocultos, é uma boa prática realizar uma verificação de sanidade para que eles forneçam uma representação útil das emoções que queremos classificar
-Como visualizar os estados ocultos em 768 dimensões é complicado, para dizer o mínimo, usaremos o poderoso algoritmo UMAP5 para projetar os vetores em 2D
-Como o UMAP funciona melhor quando os recursos são dimensionados para ficar no intervalo [0,1], primeiro aplicaremos um MinMax Scaler e depois usaremos o UMAP para reduzir os estados ocultos
-O resultado é uma matriz com o mesmo número de amostras de treinamento, mas com apenas 2 recursos em vez dos 768 com os quais começamos! Vamos investigar um pouco mais os dados compactados e plotar a densidade de pontos para cada categoria separadamente
-NOTAEstas são apenas projeções em um espaço dimensional inferior
-Só porque algumas categorias se sobrepõem não significa que elas não sejam separáveis ​​no espaço original
-Inversamente, se são separáveis ​​no espaço projetado, serão separáveis ​​no espaço original
-Agora parece haver padrões mais claros; os sentimentos negativos, como tristeza, raiva e medo, todos ocupam regiões semelhantes com distribuições ligeiramente variáveis
-Por outro lado, alegria e amor estão bem separados das emoções negativas e também compartilham um espaço semelhante.
-Finalmente, a surpresa está espalhada por todo o lugar
-Esperávamos alguma separação, mas isso não era garantido, pois o modelo não foi treinado para saber a diferença entre essas emoções, mas as aprendeu implicitamente ao prever as palavras que faltam
-Treinando um Classificador Simples Vimos que os estados ocultos são um pouco diferentes entre as emoções, embora para várias delas não haja um limite óbvio
-Vamos usar esses estados ocultos para treinar um regressor logístico simples com o Scikit-Learn! O treinamento de um modelo tão simples é rápido e não requer uma GPU
-Observando a precisão, pode parecer que nosso modelo é apenas um pouco melhor do que o aleatório, mas como estamos lidando com um conjunto de dados multiclasse desbalanceado, isso é significativamente melhor do que o aleatório
-Podemos ter uma ideia melhor se nosso modelo é bom comparando com uma linha de base simples
-No Scikit-Learn existe um DummyClassifier que pode ser usado para construir um classificador com heurísticas simples como sempre escolher a classe majoritária ou sempre desenhar uma classe aleatória
-que produz uma precisão de cerca de 35%
-Portanto, nosso classificador simples com incorporações BERT é significativamente melhor do que nossa linha de base
-Podemos investigar melhor o desempenho do modelo observando a matriz de confusão do classificador, que nos informa a relação entre os rótulos verdadeiro e previsto
-Podemos perceber que a raiva e o medo na maioria das vezes se confundem com a tristeza, o que vai ao encontro da observação que fizemos ao visualizar as incorporações
-Também o amor e a surpresa são frequentemente confundidos com alegria.
-Para obter uma imagem ainda melhor do desempenho da classificação, podemos imprimir o relatório de classificação do Scikit-Learn e observar a precisão, recuperação e F-score para cada classe: Na próxima seção, exploraremos a abordagem de ajuste fino que leva a uma classificação superior desempenho
-No entanto, é importante observar que isso requer muito mais recursos computacionais, como GPUs, que podem não estar disponíveis em sua empresa
-Em casos como esse, uma abordagem baseada em recursos pode ser um bom compromisso entre o aprendizado de máquina tradicional e o aprendizado profundo
-Ajustando TransformersVamos agora explorar o que é necessário para ajustar um Transformer de ponta a ponta
-Com a abordagem de ajuste fino, não usamos os estados ocultos como recursos fixos, mas os treinamos conforme mostrado na Figura 2-6
-Isso requer que a cabeça de classificação seja diferenciável, e é por isso que esse método geralmente usa uma rede neural para classificação
-Como retreinamos todos os parâmetros do DistilBERT, essa abordagem requer muito mais computação do que a abordagem de extração de recursos e normalmente requer uma GPU
-Como treinamos os estados ocultos que servem como entradas para o modelo de classificação, também evitamos o problema de trabalhar com dados que podem não ser adequados para a tarefa de classificação
-Em vez disso, os estados ocultos iniciais se adaptam durante o treinamento para diminuir a perda do modelo e, assim, aumentar seu desempenho
-Se a computação necessária estiver disponível, esse método geralmente é escolhido em vez da abordagem baseada em recursos, pois geralmente supera
-Usaremos a API do Trainer do Transformers para simplificar o loop de treinamento - vamos ver os ingredientes de que precisamos para configurar um! A primeira coisa que precisamos é de um modelo DistilBERT pré-treinado como o que usamos na abordagem baseada em recursos
-A única pequena modificação é que usamos o modelo AutoModelForSequenceClassification em vez de AutoModel
-A diferença é que o modelo AutoModelForSequenceClassification tem um cabeçalho de classificação sobre as saídas do modelo que podem ser facilmente treinadas com o modelo base
-Precisamos apenas especificar quantos rótulos o modelo tem para prever (seis no nosso caso), já que isso determina o número de saídas que o chefe de classificação tem
-Você provavelmente verá um aviso de que algumas partes dos modelos são inicializadas aleatoriamente
-Isso é normal, pois o chefe de classificação ainda não foi treinado
-Pré-processar os TweetsAlém da tokenização, também precisamos definir o formato das colunas para a tocha
-tensor
-Isso nos permite treinar o modelo sem precisar alternar entre listas, arrays e tensores
-Com conjuntos de dados, podemos usar a função set_format para alterar o tipo de dados das colunas que desejamos manter, descartando todo o resto
-Além disso, definimos algumas métricas que são monitoradas durante o treinamento
-Pode ser qualquer função que receba um objeto de previsão, que contenha as previsões do modelo, bem como os rótulos corretos e retorne um dicionário com valores de métrica escalar
-Vamos monitorar o F-score e a precisão do modelo
-Treinando o ModeloAqui também definimos o tamanho do lote, a taxa de aprendizado, o número de épocas e também especificamos para carregar o melhor modelo no final da execução do treinamento
-Com este ingrediente final, podemos instanciar e ajustar nosso modelo com o TrainerEpochTraining LossValidation LossAccuracyOlhando para os logs, podemos ver que nosso modelo tem uma pontuação F no conjunto de validação de cerca de 92% - esta é uma melhoria significativa em relação à abordagem baseada em recursos! Também podemos ver que o melhor modelo foi salvo executando o método de avaliação: Vamos dar uma olhada mais detalhada nas métricas de treinamento calculando a matriz de confusão
-Visualize a matriz de confusãoPara visualizar a matriz de confusão, primeiro precisamos obter as previsões no conjunto de validação
-A função predict da classe Trainer retorna vários objetos úteis que podemos usar para avaliação
-Ele também contém as previsões brutas para cada classe
-Decodificamos as previsões avidamente com anargmax
-Isso produz o rótulo previsto e tem o mesmo formato dos rótulos retornados pelos modelos Scikit-Learn na abordagem baseada em recursos
-Com as previsões, podemos traçar a matriz de confusão novamente: Podemos ver que as previsões estão muito mais próximas da matriz de confusão diagonal ideal
-A categoria amor ainda é frequentemente confundida com alegria que parece natural
-Além disso, a surpresa e o medo são frequentemente confundidos e a surpresa também é frequentemente confundida com alegria.
-No geral, o desempenho do modelo parece muito bom
-Além disso, olhar para o relatório de classificação revela que o modelo também está tendo um desempenho muito melhor para classes minoritárias como surpresa
-recallf1-scoresupportsadnessalegriaamorrangermedosurpresaFazendo previsõesTambém podemos usar o modelo ajustado para fazer previsões sobre novos tweets
-Primeiro, precisamos tokenizar o texto, passar o tensor pelo modelo e extrair os logits
-As previsões do modelo não são normalizadas, o que significa que não são uma distribuição de probabilidade, mas as saídas brutas antes da camada softmax
-Podemos facilmente transformar as previsões em uma distribuição de probabilidade aplicando uma função softmax a elas
-Como temos um tamanho de lote de 1, podemos nos livrar da primeira dimensão e converter o tensor em uma matriz NumPy para processamento na CPU
-Podemos ver que as probabilidades agora estão devidamente normalizadas observando a soma que dá 1
-Análise de erroAntes de prosseguir, devemos investigar um pouco mais a previsão do nosso modelo
-Uma ferramenta simples, mas poderosa, é classificar as amostras de validação pela perda do modelo
-Ao passar a etiqueta durante o passe para frente, a perda é calculada automaticamente e retornada
-Abaixo está uma função que retorna a perda junto com o rótulo previsto
-seguindo
-Rótulos errados Todo processo que adiciona rótulos aos dados pode ser falho; anotadores podem cometer erros ou discordar, inferir rótulos de outros recursos pode falhar
-Se fosse fácil anotar dados automaticamente, não precisaríamos de um modelo para fazer isso
-Assim, é normal que existam alguns exemplos rotulados incorretamente
-Com esta abordagem, podemos encontrá-los e corrigi-los rapidamente
-Peculiaridades do conjunto de dadosConjuntos de dados no mundo real são sempre um pouco confusos
-Ao trabalhar com texto pode acontecer que existam alguns caracteres especiais ou strings nas entradas que confundem o modelo
-A inspeção das previsões mais fracas do modelo pode ajudar a identificar tais recursos, e limpar os dados ou injetar exemplos semelhantes pode tornar o modelo mais robusto
-Vamos primeiro dar uma olhada nas amostras de dados com as maiores perdas
-sou preguiçoso, meus personagens se enquadram nas categorias de presunçosos e/ou blas joypessoas e seus inimigos pessoas que se sentem incomodadas por presunçosas e/ou blas pessoas temerosas me chamei de pró-vida e votei em perry sem saber essa informação eu me sentiria traído, mas além disso eu sentiria que havia traído deus ao apoiando um homem que deu uma vacina de apenas um ano de idade para meninas colocando-as em perigo para apoiar financeiramente pessoas próximas a ele alegria tristeza também me lembro de sentir como se todos os olhos estivessem em mim o tempo todo e não de uma forma glamorosa e eu odiava alegria eu meio que envergonhado por me sentir assim embora porque o treinamento de minha mãe foi uma parte tão maravilhosamente definidora da minha própria vida e eu amei e ainda amo amar tristeza, me sinto mal por renegar meu compromisso de trazer rosquinhas para os fiéis na igreja católica da sagrada família em colombo ohio amor tristeza eu acho que me sinto traída porque o admirava tanto e por alegriaalguém fazer isso com sua esposa e filhos vai além da palideztristeza quando notei duas aranhas correndo no chão em direções diferentes raiva medo deixei você matá-la agora mas na verdade não estou me sentindo muito bem hoje alegriamedo me sinto como o garotinho nerd idiota sentado em seu quintal toda alegria sozinho ouvindo e observando através da cerca o garotinho popular dando sua festa de aniversário com todos os amigos legais que você sempre desejou que fossem seus Podemos ver claramente que o modelo previu alguns dos rótulos errados
-Por outro lado, parece que existem alguns exemplos sem nenhuma classe clara que pode ser rotulada incorretamente ou exigir uma nova classe
-Em particular, a alegria parece ser mal rotulada várias vezes
-Com esta informação podemos refinar o conjunto de dados que muitas vezes pode levar a tanto ou mais ganho de desempenho quanto mais dados ou modelos maiores!
-Os modelos de aprendizado profundo são excepcionalmente bons em encontrar e explorar atalhos para chegar a uma previsão
-Uma famosa analogia para ilustrar Este é o cavalo alemão Hans do início do século 20
-Hans foi uma grande sensação, pois aparentemente era capaz de fazer aritmética simples, como somar dois números tocando no resultado; uma habilidade que lhe rendeu o apelido de Clever Hans.
-Estudos posteriores revelaram que Hans não era realmente capaz de fazer aritmética, mas podia ler o rosto do questionador e determinar com base na expressão facial quando ele alcançou o resultado correto.
-Os modelos de aprendizado profundo tendem a encontrar explorações semelhantes se os recursos permitirem
-Imagine que construímos um modelo de sentimento para analisar o feedback do cliente
-Vamos supor que por acidente o número de estrelas que o cliente deu também consta no texto
-Em vez de realmente analisar o texto, o modelo pode simplesmente aprender a contar as estrelas na revisão
-Quando implantamos esse modelo em produção e ele não tem mais acesso a essas informações, ele terá um desempenho ruim e, portanto, queremos evitar tais situações
-Por esta razão, vale a pena investir tempo olhando os exemplos nos quais o modelo está mais confiante, para que possamos ter certeza de que o modelo não explora certas características do texto
-Agora sabemos que a alegria às vezes é mal rotulada e que o modelo está mais confiante em dar o rótulo de tristeza
-Com essas informações, podemos fazer melhorias direcionadas ao nosso conjunto de dados e também ficar de olho na classe em que o modelo parece estar muito confiante
-A última etapa antes de servir o modelo treinado é salvá-lo para uso posterior
-A biblioteca do Transformer permite fazer isso em algumas etapas que mostramos na próxima seção
-Salvando o ModeloFinalmente, queremos salvar o modelo para que possamos reutilizá-lo em outra sessão ou posteriormente se quisermos colocá-lo em produção
-Podemos salvar o modelo junto com o tokenizador correto na mesma pasta A comunidade NLP se beneficia muito com o compartilhamento de modelos pré-treinados e ajustados, e todos podem compartilhar seus modelos com outras pessoas por meio do Hugging Face Model Hub
-Por meio do theHub, todos os modelos gerados pela comunidade podem ser baixados, assim como baixamos o modelo DistilBert
-Depois de fazer login com suas credenciais do Model Hub, a próxima etapa é criar um Gitrepository para armazenar seu modelo, tokenizer e quaisquer outros arquivos de configuração:transformers-cli repo create distilbert-emotionIsso cria um repositório no Model Hub que pode ser clonado e versionado como qualquer outro repositório Git
-A única sutileza é que o Model Hub usa Git Large File Storage para controle de versão do modelo, portanto, certifique-se de instalá-lo antes de clonar o repositório: agora salvamos nosso primeiro modelo para mais tarde
-Este não é o fim da jornada, mas apenas a primeira iteração
-Construir modelos de alto desempenho requer muitas iterações e análises completas e na próxima seção listamos alguns pontos para obter mais ganhos de desempenho
-Outras melhoriasExistem várias coisas que poderíamos tentar para melhorar o modelo baseado em recursos que treinamos neste capítulo
-Por exemplo, como os estados ocultos são apenas recursos do modelo, podemos incluir recursos adicionais ou manipular os existentes
-As etapas a seguir podem gerar melhorias adicionais e seriam bons exercícios: Resolva o desequilíbrio de classes aumentando ou diminuindo a amostragem das classes minoritárias ou majoritárias, respectivamente
-Como alternativa, o desequilíbrio também pode ser resolvido no modelo de classificação, ponderando as classes
-Adicione mais incorporações de diferentes modelos
-Existem muitos modelos do tipo BERT que têm um estado oculto ou saída que poderíamos usar, como ALBERT, GPT-2 ou ELMo
-Você pode concatenar a incorporação do tweet de cada modelo para criar um grande recurso de entrada
-Aplique a engenharia de recursos tradicional
-Além de usar os embeddings de Transformermodels, também poderíamos adicionar características como a duração do tweet ou se certos emojis ou hashtags estão presentes
-Embora o desempenho do modelo ajustado pareça promissor, ainda há algumas coisas que você pode tentar melhorar: - Usamos valores padrão para os hiperparâmetros, como taxa de aprendizado, queda de peso e etapas de aquecimento, que funcionam bem para tarefas de classificação padrão
-No entanto, o modelo ainda pode ser melhorado com o ajuste deles e veja o Capítulo 5, onde usamos o Optuna para ajustar sistematicamente os hiperparâmetros
-- Modelos destilados são ótimos para seu desempenho com recursos computacionais limitados
-Para algumas aplicações (p.
-g
-implantações baseadas em lote), a eficiência pode não ser a principal preocupação, então você pode tentar melhorar o desempenho usando o modelo completo
-Para espremer até a última gota de desempenho, você também pode tentar combinar vários modelos
-- Descobrimos que alguns rótulos podem estar errados, o que às vezes é chamado de ruído de rótulo
-Voltar ao conjunto de dados e limpar os rótulos é uma etapa essencial ao desenvolver aplicativos de NLP
-- Se o ruído da etiqueta for uma preocupação, você também pode pensar em aplicar a suavização da etiqueta
-6 Suavizar os rótulos de destino garante que o modelo não fique excessivamente confiante e desenha limites de decisão mais claros
-A suavização de rótulo já está integrada no Trainer e pode ser controlada por meio do argumento label_smoothing_factor
-ConclusãoParabéns, agora você sabe como treinar um modelo Transformer para classificar as emoções nos tweets! Vimos duas abordagens complementares usando recursos e ajustes finos e investigamos seus pontos fortes e fracos
-Melhorar qualquer um dos modelos é um esforço em aberto e listamos vários caminhos para melhorar ainda mais o modelo e o conjunto de dados
-No entanto, este é apenas o primeiro passo para a construção de um aplicativo do mundo real com Transformers, então para onde vamos? Aqui está uma lista de desafios que você provavelmente enfrentará ao longo do caminho que abordamos neste livro: Meu chefe quer meu modelo em produção para ontem! - No próximo capítulo, mostraremos como empacotar nosso modelo como um aplicativo da Web que você pode implantar e compartilhar com seus colegas
-Meus usuários querem previsões mais rápidas! - Já vimos neste capítulo que o DistilBER é uma abordagem para este problema e em capítulos posteriores vamos nos aprofundar em como a destilação realmente funciona, junto com outros truques para acelerar seus modelos Transformer
-O seu modelo também pode fazer X? - Como mencionamos neste capítulo, os Transformers são extremamente versáteis e, no restante do livro, exploraremos uma variedade de tarefas, como responder a perguntas e reconhecer entidades nomeadas, todas usando a mesma arquitetura básica
-Nenhum dos meus textos está em inglês! - Acontece que os Transformers também vêm em uma variedade multilíngue e os usaremos para realizar tarefas em vários idiomas ao mesmo tempo
-Não tenho rótulos! - O aprendizado de transferência permite que você ajuste alguns rótulos e mostraremos como eles podem ser usados ​​para anotar com eficiência dados não rotulados
+
+Nesse caso, o modelo de classificação precisa trabalhar com dados abaixo do ideal e é melhor usar a abordagem de ajuste fino discutida na seção a seguir.
+
+Aqui, usamos o PyTorch para verificar se uma GPU está disponível e, em seguida, encadeamos o método PyTorch nn.Module.to("cuda") ao carregador de modelos; sem isso, executaríamos o modelo na CPU que pode ser consideravelmente mais lenta.
+
+A classe AutoModel corresponde ao codificador de entrada que converte os vetores one-hot em incorporações com codificações posicionais e os alimenta através da pilha do codificador para retornar os estados ocultos.
+
+O cabeçalho do modelo de linguagem que pega os estados ocultos e os decodifica para a previsão do token mascarado é excluído, pois é necessário apenas para o pré-treinamento.
+
+Se você deseja usar esse cabeçote de modelo, pode carregar o modelo completo com AutoModelForMaskedLM.
+
+Agora podemos passar esse tensor para o modelo para extrair os estados ocultos.
+
+Dependendo da configuração do modelo, a saída pode conter vários objetos, como estados ocultos, perdas ou atenções, que são organizados em uma classe semelhante a um namedtuple em Python.
+
+Em nosso exemplo, a saída do modelo é uma classe de dados Python chamada BaseModelOutput e, como qualquer classe, podemos acessar os atributos pelo nome.
+
+Como o modelo atual retorna apenas uma entrada que é o último estado oculto, vamos passar o texto codificado e examinar as saídas:
+
+Olhando para o tensor de estado oculto, vemos que ele tem a forma [batch_size, n_tokens, hidden_dim]. A maneira como o BERT funciona é que um estado oculto é retornado para cada entrada, e o modelo usa esses estados ocultos para prever tokens mascarados na tarefa de pré-treinamento.
+
+Para tarefas de classificação, é prática comum usar o estado oculto associado ao token [CLS] como o recurso de entrada, localizado na primeira posição na segunda dimensão.
+
+Tokenizando todo o conjunto de dados, agora que sabemos como extrair os estados ocultos de uma única string, vamos tokenizar todo o conjunto de dados! Para fazer isso, podemos escrever uma função simples que tokenizará nossos exemplos.
+
+vemos que o resultado é um dicionário, onde cada valor é uma lista de listas geradas pelo tokenizer.
+
+Em particular, cada sequência em input_ids começa com 101 e termina com 102, seguido de zeros, correspondendo aos tokens [CLS], [SEP] e [PAD] respectivamente:
+
+Observe também que, além de retornar os tweets codificados como input_ids, o tokenizer também retorna uma lista de arrays de Attention_mask.
+
+Isso ocorre porque não queremos que o modelo fique confuso com os tokens de preenchimento adicionais, portanto, a máscara de atenção permite que o modelo ignore as partes preenchidas da entrada.
+
+Consulte a Figura 2-5 para obter uma explicação visual sobre como os IDs de entrada e as máscaras de atenção são formatados.
+
+Como os tensores de entrada são empilhados apenas ao serem passados ​​para o modelo, é importante que o tamanho do lote da tokenização e do treinamento correspondam e que não haja embaralhamento.
+
+Caso contrário, os tensores de entrada podem não ser empilhados porque têm comprimentos diferentes.
+
+Isso acontece porque eles são preenchidos até o comprimento máximo do lote de tokenização, que pode ser diferente para cada lote.
+
+Em caso de dúvida, defina batch_size=None na etapa de tokenização, pois isso aplicará a tokenização globalmente e todos os tensores de entrada terão o mesmo comprimento.
+
+Isso, no entanto, usará mais memória. Apresentaremos uma alternativa a essa abordagem com uma função de agrupamento que apenas une os tensores quando eles são necessários e os preenche de acordo.
+
+Para aplicar nossa função tokenize a todo o corpus de emoções, usaremos a função DatasetDict.map.
+
+Isso aplicará o tokenize em todas as divisões do corpus, portanto, nossos dados de treinamento, validação e teste serão pré-processados ​​em uma única linha de código: emoções_encoded = emoções.map(tokenize, batched=True, batch_size=None)
+
+Por padrão, DatasetDict.map opera individualmente em cada exemplo no corpus, portanto, definir batched=True codificará os tweets em lotes, enquanto batch_size=None aplica nossa função tokenize em um único lote e garante que os tensores de entrada e as máscaras de atenção tenham o mesma forma globalmente.
+
+Podemos ver que esta operação adicionou dois novos recursos ao conjunto de dados: input_ids e a máscara de atenção.
+
+Agora que convertemos nossos tweets em entradas numéricas, a próxima etapa é extrair os últimos estados ocultos para que possamos alimentá-los a um classificador.
+
+Se tivéssemos um único exemplo, poderíamos simplesmente passar os input_ids e Attention_mask para o modelo da seguinte maneira, mas o que realmente queremos são os estados ocultos em todo o conjunto de dados.
+
+Para isso, podemos usar a função DatasetDict.map novamente! Vamos definir uma função forward_pass que recebe um lote de IDs de entrada e máscaras de atenção, os alimenta no modelo e adiciona um novo recurso hidden_state ao nosso lote.
+
+Criando uma matriz de recursos, o conjunto de dados pré-processado agora contém todas as informações necessárias para treinar um classificador nele.
+
+Usaremos os estados ocultos como recursos de entrada e os rótulos como destinos.
+
+Podemos criar facilmente as matrizes correspondentes no conhecido formato Scikit-Learn da seguinte maneira.
+
+Redução de Dimensionalidade com UMAP, Antes de treinarmos um modelo nos estados ocultos, é uma boa prática realizar uma verificação de sanidade para que eles forneçam uma representação útil das emoções que queremos classificar.
+
+Como visualizar os estados ocultos em 768 dimensões é complicado, para dizer o mínimo, usaremos o poderoso algoritmo UMAP5 para projetar os vetores em 2D.
+
+Como o UMAP funciona melhor quando os recursos são dimensionados para ficar no intervalo [0,1], primeiro aplicaremos um MinMaxScaler e depois usaremos o UMAP para reduzir os estados ocultos.
+
+O resultado é uma matriz com o mesmo número de amostras de treinamento, mas com apenas 2 recursos em vez dos 768 com os quais começamos! Vamos investigar um pouco mais os dados compactados e plotar a densidade de pontos para cada categoria separadamente.
+
+Estas são apenas projeções em um espaço dimensional inferior. Só porque algumas categorias se sobrepõem não significa que elas não sejam separáveis ​​no espaço original.
+
+Inversamente, se forem separáveis ​​no espaço projetado, serão separáveis ​​no espaço original.
+
+Agora parece haver padrões mais claros; os sentimentos negativos, como tristeza, raiva e medo, ocupam regiões semelhantes com distribuições ligeiramente variáveis.
+
+Por outro lado, a alegria e o amor estão bem separados das emoções negativas e também compartilham um espaço semelhante.
+
+Finalmente, a surpresa está espalhada por todo o lugar. Esperávamos alguma separação, mas isso não era garantido, pois o modelo não foi treinado para saber a diferença entre essas emoções, mas as aprendeu implicitamente ao prever as palavras que faltavam.
+
+Treinando um Classificador Simples, vimos que os estados ocultos são um pouco diferentes entre as emoções, embora para várias delas não haja um limite óbvio.
+
+Vamos usar esses estados ocultos para treinar um regressor logístico simples com o Scikit-Learn! Treinar um modelo tão simples é rápido e não requer uma GPU.
+
+Observando a precisão, pode parecer que nosso modelo é apenas um pouco melhor do que aleatório, mas como estamos lidando com um conjunto de dados multiclasse desbalanceado, isso é significativamente melhor do que aleatório.
+
+Podemos ter uma ideia melhor se nosso modelo é bom comparando com uma linha de base simples.
+
+No Scikit-Learn existe um DummyClassifier que pode ser usado para construir um classificador com heurísticas simples como sempre escolher a classe majoritária ou sempre desenhar uma classe aleatória.
+
+que produz uma precisão de cerca de 35%. Portanto, nosso classificador simples com incorporações BERT é significativamente melhor do que nossa linha de base.
+
+Podemos investigar melhor o desempenho do modelo observando a matriz de confusão do classificador, que nos informa a relação entre os rótulos verdadeiro e previsto.
+
+Podemos perceber que a raiva e o medo na maioria das vezes se confundem com a tristeza, o que vai ao encontro da observação que fizemos ao visualizar as incorporações. Também o amor e a surpresa são frequentemente confundidos com alegria.
+
+Para obter uma imagem ainda melhor do desempenho da classificação, podemos imprimir o relatório de classificação do Scikit-Learn e observar a precisão, recall e F-score para cada classe:
+
+Na próxima seção, exploraremos a abordagem de ajuste fino que leva a um desempenho de classificação superior. No entanto, é importante observar que isso requer muito mais recursos computacionais, como GPUs, que podem não estar disponíveis em sua empresa.
+
+Em casos como esse, uma abordagem baseada em recursos pode ser um bom compromisso entre o aprendizado de máquina tradicional e o aprendizado profundo.
+
+Transformadores de ajuste fino, vamos agora explorar o que é necessário para ajustar um Transformer de ponta a ponta. Com a abordagem de ajuste fino, não usamos os estados ocultos como recursos fixos, mas os treinamos conforme mostrado na Figura 2-6.
+
+Isso requer que a cabeça de classificação seja diferenciável, e é por isso que esse método geralmente usa uma rede neural para classificação. Como treinamos novamente todos os parâmetros do DistilBERT, essa abordagem requer muito mais computação do que a abordagem de extração de recursos e normalmente requer uma GPU.
+
+Como treinamos os estados ocultos que servem como entradas para o modelo de classificação, também evitamos o problema de trabalhar com dados que podem não ser adequados para a tarefa de classificação. Em vez disso, os estados ocultos iniciais se adaptam durante o treinamento para diminuir a perda do modelo e, assim, aumentar seu desempenho.
+
+Se a computação necessária estiver disponível, esse método geralmente é escolhido em vez da abordagem baseada em recursos, pois geralmente a supera.
+
+Usaremos a API do Trainer da Transformers para simplificar o ciclo de treinamento - vamos ver os ingredientes de que precisamos para configurar um! A primeira coisa que precisamos é de um modelo DistilBERT pré-treinado como o que usamos na abordagem baseada em recursos.
+
+A única pequena modificação é que usamos o modelo AutoModelForSequenceClassification em vez de AutoModel.
+
+A diferença é que o modelo AutoModelForSequenceClassification tem um cabeçalho de classificação sobre as saídas do modelo que podem ser facilmente treinadas com o modelo base.
+
+Precisamos apenas especificar quantos rótulos o modelo tem para prever (seis no nosso caso), já que isso determina o número de saídas que o chefe de classificação tem.
+
+Você provavelmente verá um aviso de que algumas partes dos modelos são inicializadas aleatoriamente.
+
+Isso é normal, pois o chefe da classificação ainda não foi treinado.
+
+Pré-processar os Tweets Além da tokenização, também precisamos definir o formato das colunas totorch.Tensor.
+
+Isso nos permite treinar o modelo sem precisar alternar entre listas, arrays e tensores.
+
+Com conjuntos de dados, podemos usar a função set_format para alterar o tipo de dados das colunas que desejamos manter, descartando todo o resto.
+
+Além disso, definimos algumas métricas que são monitoradas durante o treinamento. Isso pode ser qualquer
+função que recebe um objeto de previsão, que contém as previsões do modelo, bem como o correto
+rótulos e retorna um dicionário com valores de métrica escalar. Vamos monitorar o F-score e o
+precisão do modelo.
+
+Treinando o Modelo
+
+Aqui também definimos o tamanho do lote, taxa de aprendizado, número de épocas e também especificamos para carregar o
+melhor modelo no final da corrida de treinamento. Com este ingrediente final, podemos instanciar e ajustar nosso modelo com o Trainer
+
+Observando os logs, podemos ver que nosso modelo tem uma pontuação F no conjunto de validação de cerca de 92% - esta é uma melhoria significativa em relação à abordagem baseada em recursos! Também podemos ver que o melhor modelo foi salvo executando o método de avaliação:
+
+Vamos dar uma olhada mais detalhada nas métricas de treinamento calculando a matriz de confusão.
+
+Visualize a matriz de confusão Para visualizar a matriz de confusão, primeiro precisamos obter as previsões no conjunto de validação.
+
+A função de previsão da classe Trainer retorna vários objetos úteis que podemos usar para avaliação.
+
+Ele também contém as previsões brutas para cada classe. Decodificamos as previsões avidamente com um argmax.
+
+Isso produz o rótulo previsto e tem o mesmo formato dos rótulos retornados pelos modelos Scikit-Learn na abordagem baseada em recursos.
+
+Com as previsões, podemos traçar a matriz de confusão novamente:
+
+Podemos ver que as previsões estão muito mais próximas da matriz de confusão diagonal ideal.
+
+A categoria amor ainda é frequentemente confundida com a alegria que parece natural. Além disso, surpresa e medo costumam ser confundidos e surpresa também é frequentemente confundida com alegria.
+
+No geral, o desempenho do modelo parece muito bom. Além disso, olhar para o relatório de classificação revela que o modelo também está tendo um desempenho muito melhor para classes minoritárias como surpresa.
+
+Fazendo previsões, também podemos usar o modelo ajustado para fazer previsões sobre novos tweets.
+
+Primeiro, precisamos tokenizar o texto, passar o tensor pelo modelo e extrair os logits.
+
+As previsões do modelo não são normalizadas, o que significa que não são uma distribuição de probabilidade, mas as saídas brutas antes da camada softmax.
+
+Podemos facilmente transformar as previsões em uma distribuição de probabilidade aplicando uma função softmax a elas.
+
+Como temos um tamanho de lote de 1, podemos nos livrar da primeira dimensão e converter o tensor em uma matriz NumPy para processamento na CPU.
+
+Podemos ver que as probabilidades agora estão devidamente normalizadas observando a soma que resulta em 1.
+
+Análise de erro, antes de prosseguir, devemos investigar um pouco mais a previsão do nosso modelo.
+
+Uma ferramenta simples, porém poderosa, é classificar as amostras de validação pela perda do modelo. Ao passar a etiqueta durante o passe para frente, a perda é calculada e retornada automaticamente.
+
+Abaixo está uma função que retorna a perda junto com o rótulo previsto.
+
+Rótulos errados, todo processo que adiciona rótulos aos dados pode ser falho; os anotadores podem cometer erros ou discordar, inferir rótulos de outros recursos pode falhar.
+
+Se fosse fácil anotar dados automaticamente, não precisaríamos de um modelo para fazer isso.
+
+Assim, é normal que existam alguns exemplos mal rotulados. Com essa abordagem, podemos encontrá-los e corrigi-los rapidamente.
+
+Peculiaridades do conjunto de dados, conjuntos de dados no mundo real são sempre um pouco confusos. Ao trabalhar com texto, pode acontecer que existam alguns caracteres especiais ou strings nas entradas que confundem o modelo.
+
+A inspeção das previsões mais fracas do modelo pode ajudar a identificar tais recursos, e limpar os dados ou injetar exemplos semelhantes pode tornar o modelo mais robusto.
+
+Vamos primeiro dar uma olhada nas amostras de dados com as maiores perdas.
+
+sou preguiçoso, meus personagens se enquadram nas categorias de pessoas presunçosas e/ou despreocupadas e suas pessoas frustradas que se sentem incomodadas por pessoas presunçosas e/ou blasfemas
+
+eu me chamei de pró vida e votei em perry sem saber dessa informação eu me sentiria traído, mas além disso eu sentiria que havia traído deus ao apoiar um homem que ordenou uma vacina de apenas um ano de idade para meninas colocando-as em perigo para apoiar financeiramente pessoas próximas para ele
+
+também me lembro de sentir que todos os olhos estavam em mim o tempo todo e não de uma forma glamorosa e eu odiei isso
+
+Estou meio envergonhado por me sentir assim porque o treinamento da minha mãe foi uma parte tão maravilhosamente definidora da minha própria vida e eu amei e ainda amo
+
+sinto-me mal por ter descumprido meu compromisso de levar rosquinhas aos fiéis da igreja católica da sagrada família em columbus, ohio
+
+acho que me sinto traída porque o admirava muito e para alegria de alguém fazer isso com sua esposa e filhos simplesmente vai além dos limites
+
+quando notei duas aranhas correndo no chão em direções diferentes
+
+Eu deixei você matá-lo agora, mas na verdade não estou me sentindo muito bem hoje
+
+eu me sinto como o garotinho idiota e nerd sentado em seu quintal toda alegria sozinho ouvindo e observando através da cerca o garotinho popular fazendo sua festa de aniversário com todos os seus amigos legais que você sempre desejou que fossem seus
+
+Podemos ver claramente que o modelo previu alguns dos rótulos errados.
+
+Por outro lado, parece que existem alguns exemplos sem classe clara que podem ser rotulados incorretamente ou exigir uma nova classe.
+
+Em particular, a alegria parece ser mal rotulada várias vezes.
+
+Com essas informações, podemos refinar o conjunto de dados, o que geralmente pode levar a um ganho de desempenho maior ou igual a ter mais dados ou modelos maiores!
+
+Ao observar as amostras com as menores perdas, observamos que o modelo parece ser o mais confiável ao prever a classe de tristeza.
+
+Os modelos de aprendizado profundo são excepcionalmente bons em encontrar e explorar atalhos para chegar a uma previsão.
+
+Uma analogia famosa para ilustrar Este é o cavalo alemão Hans do início do século XX.
+
+Hans foi uma grande sensação, pois aparentemente era capaz de fazer aritmética simples, como adicionar dois números tocando no resultado; uma habilidade que lhe rendeu o apelido de Clever Hans.
+
+Estudos posteriores revelaram que Hans na verdade não era capaz de fazer aritmética, mas podia ler o rosto do questionador e determinar com base na expressão facial quando ele alcançou o resultado correto.
+
+Os modelos de aprendizado profundo tendem a encontrar explorações semelhantes se os recursos permitirem.
+
+Imagine que construímos um modelo de sentimento para analisar o feedback do cliente. Suponhamos que, por acidente, o número de estrelas que o cliente deu também esteja incluído no texto.
+
+Em vez de realmente analisar o texto, o modelo pode simplesmente aprender a contar as estrelas na revisão. Quando implantamos esse modelo em produção e ele não tem mais acesso a essas informações, ele terá um desempenho ruim e, portanto, queremos evitar tais situações.
+
+Por esta razão, vale a pena investir tempo olhando os exemplos nos quais o modelo tem mais confiança, para que possamos ter certeza de que o modelo não explora certas características do texto.
+
+Agora sabemos que a alegria às vezes é mal rotulada e que o modelo está mais confiante em dar o rótulo de tristeza.
+
+Com essas informações, podemos fazer melhorias direcionadas ao nosso conjunto de dados e também ficar de olho na classe em que o modelo parece estar muito confiante.
+
+A última etapa antes de servir o modelo treinado é salvá-lo para uso posterior.
+
+A biblioteca do Transformer permite fazer isso em algumas etapas que mostramos na próxima seção.
+
+Salvando o Modelo, Finalmente, queremos salvar o modelo para que possamos reutilizá-lo em outra sessão ou posteriormente se quisermos colocá-lo em produção.
+
+Podemos salvar o modelo junto com o tokenizador correto na mesma pasta. A comunidade NLP se beneficia muito com o compartilhamento de modelos pré-treinados e ajustados, e todos podem compartilhar seus modelos com outras pessoas por meio do Hugging Face Model Hub.
+
+Por meio do Hub, todos os modelos gerados pela comunidade podem ser baixados da mesma forma que baixamos o modelo DistilBert.
+
+Depois de fazer login com suas credenciais do Model Hub, a próxima etapa é criar um repositório Git para armazenar seu modelo, tokenizer e quaisquer outros arquivos de configuração: Transformers-cli repo create distilbert-emotion
+
+Isso cria um repositório no Model Hub que pode ser clonado e com controle de versão como qualquer outro repositório Git.
+
+A única sutileza é que o Model Hub usa Git Large File Storage para controle de versão do modelo, portanto, certifique-se de instalá-lo antes de clonar o repositório:
+
+Agora salvamos nosso primeiro modelo para mais tarde. Este não é o fim da jornada, mas apenas a primeira iteração.
+
+A construção de modelos de alto desempenho requer muitas iterações e análises minuciosas e, na próxima seção, listamos alguns pontos para obter mais ganhos de desempenho.
+
+Outras melhorias, Há uma série de coisas que poderíamos tentar para melhorar o modelo baseado em recursos que treinamos neste capítulo.
+
+Por exemplo, como os estados ocultos são apenas recursos do modelo, podemos incluir recursos adicionais ou manipular os existentes.
+
+As etapas a seguir podem resultar em melhorias adicionais e seriam bons exercícios:
+
+Aborde o desequilíbrio de classe aumentando ou diminuindo a amostragem das classes minoritárias ou majoritárias, respectivamente.
+
+Como alternativa, o desequilíbrio também pode ser resolvido no modelo de classificação por meio da ponderação das classes.
+
+Adicione mais incorporações de diferentes modelos. Existem muitos modelos do tipo BERT que possuem um estado oculto ou saída que poderíamos usar, como ALBERT, GPT-2 ou ELMo.
+
+Você pode concatenar a incorporação do tweet de cada modelo para criar um grande recurso de entrada.
+
+Aplique a engenharia de recursos tradicional. Além de usar os embeddings dos modelos Transformer, também podemos adicionar recursos como a duração do tweet ou se certos emojis ou hashtags estão presentes.
+
+Embora o desempenho do modelo ajustado pareça promissor, ainda há algumas coisas que você pode tentar melhorar: - Usamos valores padrão para os hiperparâmetros, como taxa de aprendizado, queda de peso e etapas de aquecimento, que funcionam bem para padrões tarefas de classificação.
+
+No entanto, o modelo ainda pode ser melhorado com o ajuste deles e veja o Capítulo 5, onde usamos o Optuna para ajustar sistematicamente os hiperparâmetros.
+
+Os modelos destilados são ótimos para seu desempenho com recursos computacionais limitados.
+
+Para alguns aplicativos (por exemplo, implantações baseadas em lote), a eficiência pode não ser a principal preocupação, então você pode tentar melhorar o desempenho usando o modelo completo.
+
+Para espremer até a última gota de desempenho, você também pode tentar combinar vários modelos.
+
+Descobrimos que alguns rótulos podem estar errados, o que às vezes é chamado de ruído de rótulo.
+
+Voltar ao conjunto de dados e limpar os rótulos é uma etapa essencial ao desenvolver aplicativos de NLP.
+
+Se o ruído do rótulo for uma preocupação, você também pode pensar em aplicar a suavização do rótulo.6 Suavizar os rótulos de destino garante que o modelo não fique excessivamente confiante e desenha limites de decisão mais claros.
+
+A suavização de rótulo já está integrada no Trainer e pode ser controlada por meio do argumento label_smoothing_factor.
+
+Parabéns, agora você sabe como treinar um modelo Transformer para classificar as emoções em tweets! Vimos duas abordagens complementares usando recursos e ajustes finos e investigamos seus pontos fortes e fracos.
+
+Melhorar qualquer um dos modelos é um empreendimento em aberto e listamos vários caminhos para melhorar ainda mais o modelo e o conjunto de dados.
+
+No entanto, este é apenas o primeiro passo para a construção de um aplicativo do mundo real com Transformers, então, para onde ir a partir daqui? Aqui está uma lista de desafios que você provavelmente enfrentará ao longo do caminho que abordamos neste livro:
+
+Meu chefe quer meu modelo em produção ontem! - No próximo capítulo, mostraremos como empacotar nosso modelo como um aplicativo da Web que você pode implantar e compartilhar com seus colegas.
+
+Meus usuários querem previsões mais rápidas! - Já vimos neste capítulo que o DistilBERT é uma abordagem para este problema e em capítulos posteriores vamos nos aprofundar em como a destilação realmente funciona, juntamente com outros truques para acelerar seus modelos de Transformers.
+
+O seu modelo também pode fazer X? - Como mencionamos neste capítulo, os Transformers são extremamente versáteis e, no restante do livro, exploraremos uma variedade de tarefas, como responder a perguntas e reconhecer entidades nomeadas, todas usando a mesma arquitetura básica.
+
+Nenhum dos meus textos está em inglês! - Acontece que os Transformers também vêm em uma variedade multilíngue e os usaremos para realizar tarefas em vários idiomas ao mesmo tempo.
+
+Não tenho rótulos! - O aprendizado de transferência permite que você ajuste alguns rótulos e mostraremos como eles podem ser usados ​​para anotar com eficiência dados não rotulados.
+
 No próximo capítulo, veremos como os Transformers podem ser usados ​​para recuperar informações de grandes corpora e encontrar respostas para perguntas específicas.
