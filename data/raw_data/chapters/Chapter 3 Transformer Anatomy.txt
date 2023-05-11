@@ -328,4 +328,4 @@ We added embedding layers for tokens and positional information, built in a feed
 We also had a look at the decoder side of the  Transformer architecture and concluded the chapter with an overview of the most important model architectures.
 With the code that we’ve implemented in this chapter you are well-placed to understand the source code of Transformers and even contribute your first model to the library!
 There is a guide in the Transformer documentation that provides you with the information needed to get started.
-Now that we have a better understanding of the underlying principles let’s go beyond simple classification and build a question-answering model in the next chapter.
+Now that we have a better understanding of the underlying principles let’s go beyond simple classification and build a question-answering model in the next chapter..
